@@ -191,6 +191,12 @@ def map_token_indices(raw_tokenizer, global_prompt, local_prompts):
 
 def distribute_segment_lengths(num_segments, latent_frames, specified_lengths=None):
     """Validate or auto-distribute segment frame counts, capped to fit within latent_frames."""
+    if num_segments > latent_frames:
+        raise ValueError(
+            f"Timeline has {num_segments} segments but the video only has {latent_frames} latent frames. "
+            "Increase the video duration or reduce the number of segments."
+        )
+
     if specified_lengths:
         if len(specified_lengths) != num_segments:
             raise ValueError(
