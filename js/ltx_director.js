@@ -1,5 +1,6 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
+import { calculateTimelineDurationFrames } from "./timeline_duration.js";
 
 // --- UI Constants & Configuration ---
 const RULER_HEIGHT = 24;
@@ -1641,7 +1642,7 @@ class TimelineEditor {
 
             this.timeline.segments.push(seg);
             this.timeline.segments.sort((a, b) => a.start - b.start);
-            this.syncDurationToImageTextSegments();
+            this.syncDurationToTimelineSegments();
             this.selectionType = "image";
             this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
 
@@ -1748,6 +1749,7 @@ class TimelineEditor {
 
           this.timeline.audioSegments.push(seg);
           this.timeline.audioSegments.sort((a, b) => a.start - b.start);
+          this.syncDurationToTimelineSegments(false);
           this.selectionType = "audio";
           this.selectedIndex = this.timeline.audioSegments.findIndex(s => s.id === seg.id);
 
@@ -1765,6 +1767,7 @@ class TimelineEditor {
   }
 
   deleteSelectedSegment() {
+    const reflowImageText = this.selectionType !== "audio";
     if (this.selectionType === "audio") {
       if (this.timeline.audioSegments.length === 0 || this.selectedIndex === -1) return;
       this.timeline.audioSegments.splice(this.selectedIndex, 1);
@@ -1772,9 +1775,9 @@ class TimelineEditor {
     } else {
       if (this.timeline.segments.length === 0 || this.selectedIndex === -1) return;
       this.timeline.segments.splice(this.selectedIndex, 1);
-      this.syncDurationToImageTextSegments();
       this.selectedIndex = Math.max(-1, this.selectedIndex - 1);
     }
+    this.syncDurationToTimelineSegments(reflowImageText);
     this.updateUIFromSelection();
     this.commitChanges();
     this.render();
@@ -1801,19 +1804,23 @@ class TimelineEditor {
     }
   }
 
-  syncDurationToImageTextSegments() {
+  syncDurationToTimelineSegments(reflowImageText = true) {
     const sortedSegments = [...this.timeline.segments].sort((a, b) => a.start - b.start);
     let cursor = 0;
 
     for (const seg of sortedSegments) {
-      seg.start = cursor;
       seg.length = Math.max(MIN_SEGMENT_LENGTH, Math.round(seg.length || MIN_SEGMENT_LENGTH));
-      cursor += seg.length;
+      if (reflowImageText) {
+        seg.start = cursor;
+        cursor += seg.length;
+      } else {
+        cursor = Math.max(cursor, seg.start + seg.length);
+      }
     }
 
     this.timeline.segments = sortedSegments;
 
-    const totalFrames = Math.max(1, cursor);
+    const totalFrames = calculateTimelineDurationFrames(cursor, this.timeline.audioSegments);
     const frameRate = this.getFrameRate();
     if (this.durationFramesWidget) {
       this.durationFramesWidget.value = totalFrames;
@@ -1848,7 +1855,7 @@ class TimelineEditor {
     sortedSegments[selectedSortedIndex].length = newLength;
 
     this.timeline.segments = sortedSegments;
-    this.syncDurationToImageTextSegments();
+    this.syncDurationToTimelineSegments();
     this.selectedIndex = this.timeline.segments.findIndex(s => s.id === selectedId);
 
     if (this.durationValue) {
@@ -1905,6 +1912,7 @@ class TimelineEditor {
 
     this.timeline.audioSegments = sortedSegments;
     this.selectedIndex = this.timeline.audioSegments.findIndex(s => s.id === selectedId);
+    this.syncDurationToTimelineSegments(false);
 
     if (this.durationValue) {
       this.durationValue.value = this.formatDurationSeconds(newLength);
@@ -1968,6 +1976,7 @@ class TimelineEditor {
     selected.trimStart = newTrimStart;
     selected.length = Math.min(selected.length, Math.max(MIN_SEGMENT_LENGTH, clipFrames - newTrimStart));
 
+    this.syncDurationToTimelineSegments(false);
     this.commitChanges();
     this.updateUIFromSelection();
     this.render();
@@ -2041,6 +2050,7 @@ class TimelineEditor {
     this.timeline.segments.sort((a, b) => a.start - b.start);
     this.selectionType = "image";
     this.selectedIndex = this.timeline.segments.findIndex(s => s.id === selectedId);
+    this.syncDurationToTimelineSegments(false);
     this.commitChanges();
     this.updateUIFromSelection();
     this.render();
@@ -2053,6 +2063,7 @@ class TimelineEditor {
 
     const changedCount = this.fitImageSegmentsToAudio(audioSeg, imageSegs);
     this.timeline.segments.sort((a, b) => a.start - b.start);
+    this.syncDurationToTimelineSegments(false);
     this.commitChanges();
     this.updateUIFromSelection();
     this.render();
@@ -3193,10 +3204,11 @@ class TimelineEditor {
 
         if (this.selectionType === "audio") {
           this.timeline.audioSegments = mappedArray;
+          this.syncDurationToTimelineSegments(false);
           if (this._dragTargetId) this.selectedIndex = this.timeline.audioSegments.findIndex(s => s.id === this._dragTargetId);
         } else {
           this.timeline.segments = mappedArray;
-          this.syncDurationToImageTextSegments();
+          this.syncDurationToTimelineSegments();
           if (this._dragTargetId) this.selectedIndex = this.timeline.segments.findIndex(s => s.id === this._dragTargetId);
         }
       }
@@ -3523,6 +3535,7 @@ class TimelineEditor {
         const targetArray = currentTrack === "audio" ? this.timeline.audioSegments : this.timeline.segments;
         const idx = targetArray.findIndex(s => s.id === seg.id);
         if (idx >= 0) targetArray[idx] = newSeg;
+        this.syncDurationToTimelineSegments(false);
         this.commitChanges();
         this.dismissContextMenu();
       };
@@ -3577,6 +3590,7 @@ class TimelineEditor {
         const targetArray = currentTrack === "audio" ? this.timeline.audioSegments : this.timeline.segments;
         targetArray.push(newSeg);
         targetArray.sort((a, b) => a.start - b.start);
+        this.syncDurationToTimelineSegments(false);
         this.commitChanges();
         this.dismissContextMenu();
       };
@@ -3679,6 +3693,7 @@ class TimelineEditor {
         const targetArray = currentTrack === "audio" ? this.timeline.audioSegments : this.timeline.segments;
         targetArray.push(newSeg);
         targetArray.sort((a, b) => a.start - b.start);
+        this.syncDurationToTimelineSegments(false);
         this.commitChanges();
         this.dismissGapMenu();
       };
@@ -4069,7 +4084,7 @@ class TimelineEditor {
     };
     this.timeline.segments.push(seg);
     this.timeline.segments.sort((a, b) => a.start - b.start);
-    this.syncDurationToImageTextSegments();
+    this.syncDurationToTimelineSegments();
     this.selectionType = "image";
     this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
     this.updateUIFromSelection();
@@ -4094,7 +4109,7 @@ class TimelineEditor {
     };
     this.timeline.segments.push(seg);
     this.timeline.segments.sort((a, b) => a.start - b.start);
-    this.syncDurationToImageTextSegments();
+    this.syncDurationToTimelineSegments();
     this.selectionType = "image";
     this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
     this.updateUIFromSelection();
