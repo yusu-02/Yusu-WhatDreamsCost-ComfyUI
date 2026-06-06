@@ -2,6 +2,7 @@ const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
 import { calculateTimelineDurationFrames } from "./timeline_duration.js";
 import {
+  markWorkflowChanged,
   resolveSettingsWidgetsVisible,
   saveSettingsWidgetsVisible,
 } from "./widget_visibility_state.js";
@@ -3733,6 +3734,7 @@ class TimelineEditor {
   _saveSettingsWidgetsVisibility(visible) {
     if (!this.node.properties) this.node.properties = {};
     saveSettingsWidgetsVisible(this.node.properties, visible);
+    markWorkflowChanged(app, this.node);
     if (app.graph) app.graph.setDirtyCanvas(true, true);
   }
 
