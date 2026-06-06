@@ -3,7 +3,9 @@ const { api } = window.comfyAPI.api;
 import { calculateTimelineDurationFrames } from "./timeline_duration.js";
 import {
   markWorkflowChanged,
+  resolveGlobalPromptVisible,
   resolveSettingsWidgetsVisible,
+  saveGlobalPromptVisible,
   saveSettingsWidgetsVisible,
 } from "./widget_visibility_state.js";
 
@@ -674,7 +676,10 @@ class TimelineEditor {
     this.updateUIFromSelection();
     this.commitChanges(true);
     // Restore each node's saved choice. New nodes default to the compact hidden state.
-    setTimeout(() => this.restoreSettingsWidgetsVisibility(), 0);
+    setTimeout(() => {
+      this.restoreSettingsWidgetsVisibility();
+      this.restoreGlobalPromptVisibility();
+    }, 0);
 
     let isSyncing = false;
 
@@ -3738,6 +3743,46 @@ class TimelineEditor {
     if (app.graph) app.graph.setDirtyCanvas(true, true);
   }
 
+  restoreGlobalPromptVisibility() {
+    this.setGlobalPromptVisibility(resolveGlobalPromptVisible(this.node.properties), false);
+  }
+
+  setGlobalPromptVisibility(visible, persist = true) {
+    const globalPromptWidget = this.node.widgets?.find(w => w.name === "global_prompt");
+    if (!globalPromptWidget) return;
+
+    if (!globalPromptWidget.options) globalPromptWidget.options = {};
+    globalPromptWidget.options.hidden = !visible;
+
+    if (visible) {
+      delete globalPromptWidget.computeSize;
+      globalPromptWidget.hidden = false;
+      if (globalPromptWidget.element) globalPromptWidget.element.style.display = "";
+    } else {
+      globalPromptWidget.computeSize = () => [0, 0];
+      globalPromptWidget.hidden = true;
+      if (globalPromptWidget.element) globalPromptWidget.element.style.display = "none";
+    }
+
+    if (persist) {
+      if (!this.node.properties) this.node.properties = {};
+      saveGlobalPromptVisible(this.node.properties, visible);
+      markWorkflowChanged(app, this.node);
+    }
+
+    // Force ComfyUI to recalculate the node layout after showing or hiding the textarea.
+    if (this.displayModeWidget) {
+      const origVal = this.displayModeWidget.value;
+      const otherVal = origVal === "frames" ? "seconds" : "frames";
+      this.displayModeWidget.value = otherVal;
+      if (this.displayModeWidget.callback) this.displayModeWidget.callback(otherVal);
+      this.displayModeWidget.value = origVal;
+      if (this.displayModeWidget.callback) this.displayModeWidget.callback(origVal);
+    }
+
+    if (app.graph) app.graph.setDirtyCanvas(true, true);
+  }
+
   // Hide all settings widgets on the node.
   hideSettingsWidgets(persist = true) {
     if (persist) this._saveSettingsWidgetsVisibility(false);
@@ -4022,29 +4067,7 @@ class TimelineEditor {
       cb.checked = !(globalPromptWidget.options && globalPromptWidget.options.hidden);
       cb.style.cursor = "pointer";
       cb.addEventListener("change", () => {
-        const isVisible = cb.checked;
-        if (!globalPromptWidget.options) globalPromptWidget.options = {};
-        globalPromptWidget.options.hidden = !isVisible;
-
-        if (isVisible) {
-          delete globalPromptWidget.computeSize;
-          globalPromptWidget.hidden = false;
-          if (globalPromptWidget.element) globalPromptWidget.element.style.display = "";
-        } else {
-          globalPromptWidget.computeSize = () => [0, 0];
-          globalPromptWidget.hidden = true;
-          if (globalPromptWidget.element) globalPromptWidget.element.style.display = "none";
-        }
-
-        // Force refresh via display mode double-toggle trick
-        if (this.displayModeWidget) {
-          const origVal = this.displayModeWidget.value;
-          const otherVal = origVal === "frames" ? "seconds" : "frames";
-          this.displayModeWidget.value = otherVal;
-          if (this.displayModeWidget.callback) this.displayModeWidget.callback(otherVal);
-          this.displayModeWidget.value = origVal;
-          if (this.displayModeWidget.callback) this.displayModeWidget.callback(origVal);
-        }
+        this.setGlobalPromptVisibility(cb.checked);
       });
       menu.appendChild(this._makeSettingRow("Use Global Prompt", cb));
     }
@@ -4409,6 +4432,7 @@ app.registerExtension({
             );
             this._timelineEditor.updateUIFromSelection();
             this._timelineEditor.restoreSettingsWidgetsVisibility();
+            this._timelineEditor.restoreGlobalPromptVisibility();
             this._timelineEditor.render();
           }
         }, 0);

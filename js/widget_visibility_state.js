@@ -1,4 +1,5 @@
 export const SETTINGS_WIDGETS_VISIBLE_PROPERTY = "yusuSettingsWidgetsVisible";
+export const GLOBAL_PROMPT_VISIBLE_PROPERTY = "yusuGlobalPromptVisible";
 
 export function resolveSettingsWidgetsVisible(properties) {
   return properties?.[SETTINGS_WIDGETS_VISIBLE_PROPERTY] === true;
@@ -6,6 +7,14 @@ export function resolveSettingsWidgetsVisible(properties) {
 
 export function saveSettingsWidgetsVisible(properties, visible) {
   properties[SETTINGS_WIDGETS_VISIBLE_PROPERTY] = Boolean(visible);
+}
+
+export function resolveGlobalPromptVisible(properties) {
+  return properties?.[GLOBAL_PROMPT_VISIBLE_PROPERTY] === true;
+}
+
+export function saveGlobalPromptVisible(properties, visible) {
+  properties[GLOBAL_PROMPT_VISIBLE_PROPERTY] = Boolean(visible);
 }
 
 export function markWorkflowChanged(app, node) {

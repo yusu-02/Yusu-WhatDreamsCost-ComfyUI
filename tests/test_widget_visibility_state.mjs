@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  GLOBAL_PROMPT_VISIBLE_PROPERTY,
   SETTINGS_WIDGETS_VISIBLE_PROPERTY,
   markWorkflowChanged,
+  resolveGlobalPromptVisible,
   resolveSettingsWidgetsVisible,
+  saveGlobalPromptVisible,
   saveSettingsWidgetsVisible,
 } from "../js/widget_visibility_state.js";
 
@@ -27,6 +30,28 @@ test("saving visibility only changes the visibility property", () => {
   assert.deepEqual(properties, {
     existing: "keep",
     [SETTINGS_WIDGETS_VISIBLE_PROPERTY]: true,
+  });
+});
+
+test("new nodes default to hidden global prompt", () => {
+  assert.equal(resolveGlobalPromptVisible({}), false);
+});
+
+test("saved global prompt visibility is restored", () => {
+  assert.equal(
+    resolveGlobalPromptVisible({ [GLOBAL_PROMPT_VISIBLE_PROPERTY]: true }),
+    true,
+  );
+});
+
+test("saving global prompt visibility only changes its own property", () => {
+  const properties = { existing: "keep" };
+
+  saveGlobalPromptVisible(properties, true);
+
+  assert.deepEqual(properties, {
+    existing: "keep",
+    [GLOBAL_PROMPT_VISIBLE_PROPERTY]: true,
   });
 });
 
