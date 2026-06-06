@@ -1,6 +1,10 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
 import { calculateTimelineDurationFrames } from "./timeline_duration.js";
+import {
+  resolveSettingsWidgetsVisible,
+  saveSettingsWidgetsVisible,
+} from "./widget_visibility_state.js";
 
 // --- UI Constants & Configuration ---
 const RULER_HEIGHT = 24;
@@ -668,9 +672,8 @@ class TimelineEditor {
     }
     this.updateUIFromSelection();
     this.commitChanges(true);
-    // Hide settings widgets by default to reduce node clutter.
-    // Deferred so all widget types are finalized before we touch them.
-    setTimeout(() => this.hideSettingsWidgets(), 0);
+    // Restore each node's saved choice. New nodes default to the compact hidden state.
+    setTimeout(() => this.restoreSettingsWidgetsVisibility(), 0);
 
     let isSyncing = false;
 
@@ -3719,8 +3722,23 @@ class TimelineEditor {
     return ["display_mode", "epsilon", "divisible_by", "img_compression"];
   }
 
-  // Hide all settings widgets on the node (called on init).
-  hideSettingsWidgets() {
+  restoreSettingsWidgetsVisibility() {
+    if (resolveSettingsWidgetsVisible(this.node.properties)) {
+      this.showSettingsWidgets(false);
+    } else {
+      this.hideSettingsWidgets(false);
+    }
+  }
+
+  _saveSettingsWidgetsVisibility(visible) {
+    if (!this.node.properties) this.node.properties = {};
+    saveSettingsWidgetsVisible(this.node.properties, visible);
+    if (app.graph) app.graph.setDirtyCanvas(true, true);
+  }
+
+  // Hide all settings widgets on the node.
+  hideSettingsWidgets(persist = true) {
+    if (persist) this._saveSettingsWidgetsVisibility(false);
     for (const name of this._settingsWidgetNames) {
       const w = this.node.widgets?.find(w => w.name === name);
       if (w) hideWidget(w);
@@ -3753,7 +3771,8 @@ class TimelineEditor {
   }
 
   // Restore all settings widgets on the node.
-  showSettingsWidgets() {
+  showSettingsWidgets(persist = true) {
+    if (persist) this._saveSettingsWidgetsVisibility(true);
     for (const name of this._settingsWidgetNames) {
       const w = this.node.widgets?.find(w => w.name === name);
       if (!w) continue;
@@ -4387,6 +4406,7 @@ app.registerExtension({
               Math.max(-1, this._timelineEditor.timeline.segments.length - 1)
             );
             this._timelineEditor.updateUIFromSelection();
+            this._timelineEditor.restoreSettingsWidgetsVisibility();
             this._timelineEditor.render();
           }
         }, 0);
