@@ -1,7 +1,11 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
 import { calculateTimelineDurationFrames } from "./timeline_duration.js";
-import { configureFullWidthDomWidget } from "./dom_widget_layout.js";
+import {
+  bindDomWidgetWidthToNode,
+  configureFullWidthDomWidget,
+  getFullWidthDomWidgetSize,
+} from "./dom_widget_layout.js";
 import {
   markWorkflowChanged,
   resolveGlobalPromptVisible,
@@ -4393,11 +4397,12 @@ app.registerExtension({
           getValue: () => "",
           setValue: () => { },
         });
+        bindDomWidgetWidthToNode(widget, this);
         configureFullWidthDomWidget(widget.element);
 
         widget.computeSize = function (width) {
           const canvasH = self._timelineEditor ? self._timelineEditor.canvasHeight : CANVAS_HEIGHT;
-          return [width, canvasH + 235];
+          return getFullWidthDomWidgetSize(self, canvasH + 235, width);
         };
 
         const self = this;
