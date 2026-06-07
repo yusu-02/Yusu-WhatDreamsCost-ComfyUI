@@ -3,8 +3,10 @@ const { api } = window.comfyAPI.api;
 import { calculateTimelineDurationFrames } from "./timeline_duration.js";
 import {
   bindDomWidgetWidthToNode,
+  configureFixedControlInput,
   configureFullWidthDomWidget,
   getFullWidthDomWidgetSize,
+  installDirectorStyles,
 } from "./dom_widget_layout.js";
 import {
   markWorkflowChanged,
@@ -552,12 +554,7 @@ const STYLES = `
   }
 `;
 
-if (!document.getElementById("prompt-relay-styles")) {
-  const styleEl = document.createElement("style");
-  styleEl.id = "prompt-relay-styles";
-  styleEl.textContent = STYLES;
-  document.head.appendChild(styleEl);
-}
+installDirectorStyles(document, "yusu-ltx-director-styles", STYLES);
 
 // --- Icons ---
 const ICONS = {
@@ -1307,6 +1304,7 @@ class TimelineEditor {
     this.durationValue = document.createElement("input");
     this.durationValue.type = "text";
     this.durationValue.className = "pr-duration-input";
+    configureFixedControlInput(this.durationValue, 64);
     this.durationValue.value = "0.00";
     this.durationValue.disabled = true;
     this.durationValue.title = "Duration of the selected image/text segment in seconds";
@@ -1329,6 +1327,7 @@ class TimelineEditor {
     this.audioTrimValue = document.createElement("input");
     this.audioTrimValue.type = "text";
     this.audioTrimValue.className = "pr-duration-input";
+    configureFixedControlInput(this.audioTrimValue, 64);
     this.audioTrimValue.value = "0.00";
     this.audioTrimValue.style.display = "none";
     this.audioTrimValue.title = "Start reading the selected audio clip from this source time in seconds";
@@ -1358,6 +1357,7 @@ class TimelineEditor {
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
     this.strengthValue.className = "pr-strength-input";
+    configureFixedControlInput(this.strengthValue, 52);
     this.strengthValue.value = "1.00";
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
@@ -1370,6 +1370,7 @@ class TimelineEditor {
     this.transitionValue = document.createElement("input");
     this.transitionValue.type = "text";
     this.transitionValue.className = "pr-strength-input";
+    configureFixedControlInput(this.transitionValue, 52);
     this.transitionValue.value = "0.00";
     this.transitionValue.disabled = true;
     this.transitionValue.title = "Per-segment transition smoothness: 0.00 = hard cut, 1.00 = smooth blend";
