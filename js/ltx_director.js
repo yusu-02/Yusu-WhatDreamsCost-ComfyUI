@@ -1,6 +1,7 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
 import { calculateTimelineDurationFrames } from "./timeline_duration.js";
+import { configureFullWidthDomWidget } from "./dom_widget_layout.js";
 import {
   markWorkflowChanged,
   resolveGlobalPromptVisible,
@@ -4387,10 +4388,12 @@ app.registerExtension({
         }
 
         const container = document.createElement("div");
+        configureFullWidthDomWidget(container);
         const widget = this.addDOMWidget("timeline_ui", "timeline_ui", container, {
           getValue: () => "",
           setValue: () => { },
         });
+        configureFullWidthDomWidget(widget.element);
 
         widget.computeSize = function (width) {
           const canvasH = self._timelineEditor ? self._timelineEditor.canvasHeight : CANVAS_HEIGHT;
