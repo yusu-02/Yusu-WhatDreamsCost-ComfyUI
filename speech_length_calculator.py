@@ -33,7 +33,10 @@ class SpeechLengthCalculator:
         quoted_text = " ".join([next((g for g in m if g), "") for m in matches])
         
         # Split by whitespace to get words and count them
-        words = quoted_text.split()
+        # For CJK characters, insert spaces around each character so they count as individual "words"
+        # e.g. "你好呀" → " 你  好  呀 " → split() → ["你", "好", "呀"] → 3 words
+        processed_text = re.sub(r'([\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff])', r' \1 ', quoted_text)
+        words = processed_text.split()
         word_count = len(words)
 
         def calc_frames(wpm):
