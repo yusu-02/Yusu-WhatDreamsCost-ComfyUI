@@ -254,7 +254,10 @@ app.registerExtension({
                         quotedText += (match[1] || match[2] || match[3] || match[4] || "") + " ";
                     }
 
-                    const words = quotedText.trim().split(/\s+/).filter(w => w.length > 0);
+                    // Insert spaces around CJK characters so each counts as a separate "word"
+                    // e.g. "你好呀" → " 你  好  呀 " → split → ["你","好","呀"] → 3 words
+                    const processedText = quotedText.replace(/([\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff])/g, ' $1 ');
+                    const words = processedText.trim().split(/\s+/).filter(w => w.length > 0);
                     const wordCount = words.length;
 
                     const formatTime = (wpm) => {
