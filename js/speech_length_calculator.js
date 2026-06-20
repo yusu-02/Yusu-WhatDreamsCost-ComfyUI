@@ -254,14 +254,18 @@ app.registerExtension({
                         quotedText += (match[1] || match[2] || match[3] || match[4] || "") + " ";
                     }
 
-                    // Insert spaces around CJK characters so each counts as a separate "word"
-                    // e.g. "你好呀" → " 你  好  呀 " → split → ["你","好","呀"] → 3 words
+                    // Raw word count for display: each CJK char = 1, each English word = 1
                     const processedText = quotedText.replace(/([\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff])/g, ' $1 ');
                     const words = processedText.trim().split(/\s+/).filter(w => w.length > 0);
                     const wordCount = words.length;
 
+                    // Weighted word count for frame calculation: each CJK char = 2/3
+                    const cjkPattern = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g;
+                    const cjkChars = (quotedText.match(cjkPattern) || []).length;
+                    const weightedWordCount = wordCount - cjkChars * (1 / 3);
+
                     const formatTime = (wpm) => {
-                        const baseMins = wordCount / wpm;
+                        const baseMins = weightedWordCount / wpm;
                         const totalSecs = (baseMins * 60) + additionalTime;
                         
                         const mins = Math.floor(totalSecs / 60);

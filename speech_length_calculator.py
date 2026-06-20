@@ -32,17 +32,20 @@ class SpeechLengthCalculator:
         # Extract matches, handling all possible captured groups from the regex
         quoted_text = " ".join([next((g for g in m if g), "") for m in matches])
         
-        # Split by whitespace to get words and count them
-        # For CJK characters, insert spaces around each character so they count as individual "words"
-        # e.g. "你好呀" → " 你  好  呀 " → split() → ["你", "好", "呀"] → 3 words
+        # Raw word count for display: each CJK char = 1, each English word = 1
         processed_text = re.sub(r'([\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff])', r' \1 ', quoted_text)
         words = processed_text.split()
         word_count = len(words)
 
+        # Weighted word count for frame calculation: each CJK char = 2/3
+        cjk_pattern = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
+        cjk_chars = len(cjk_pattern.findall(quoted_text))
+        weighted_word_count = word_count - cjk_chars * (1 / 3)
+
         def calc_frames(wpm):
             if word_count == 0 and additional_time == 0:
                 return 0
-            minutes = word_count / wpm
+            minutes = weighted_word_count / wpm
             seconds = (minutes * 60) + additional_time
             return math.ceil(seconds * fps)
 
