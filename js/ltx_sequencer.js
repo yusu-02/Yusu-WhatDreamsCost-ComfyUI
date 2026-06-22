@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-// Global registry to track all Yusu-LTXSequencer nodes across all subgraphs
+// Global registry to track all YusuLTXSequencer nodes across all subgraphs
 window._YusuLTXSequencerGlobalNodes = window._YusuLTXSequencerGlobalNodes || new Set();
 
 // ComfyUI native trick to cleanly hide/show widgets without deleting them
@@ -67,9 +67,9 @@ function syncFullStateAcrossNodes(sourceNode) {
 }
 
 app.registerExtension({
-    name: "Comfy.Yusu-LTXSequencer.DynamicInputs",
+    name: "Comfy.YusuLTXSequencer.DynamicInputs",
     async nodeCreated(node) {
-        if (node.comfyClass !== "Yusu-LTXSequencer") return;
+        if (node.comfyClass !== "YusuLTXSequencer") return;
 
         // Register this node instance globally
         window._YusuLTXSequencerGlobalNodes.add(node);
@@ -321,14 +321,14 @@ app.registerExtension({
                 if (!link) return null;
                 const originNode = graph.getNodeById(link.origin_id);
                 if (!originNode) return null;
-                if (originNode.comfyClass === "Yusu-MultiImageLoader") return originNode;
+                if (originNode.comfyClass === "YusuMultiImageLoader") return originNode;
                 if (originNode.type === "Reroute" || originNode.comfyClass === "Reroute") {
                     if (originNode.inputs?.[0]?.link) return traceUpstream(graph, originNode.inputs[0].link, visited);
                 }
                 if (typeof originNode.getInnerNode === "function") {
                     try {
                         const innerNode = originNode.getInnerNode(link.origin_slot);
-                        if (innerNode?.comfyClass === "Yusu-MultiImageLoader") return innerNode;
+                        if (innerNode?.comfyClass === "YusuMultiImageLoader") return innerNode;
                     } catch (e) {}
                 }
                 return null;
@@ -347,7 +347,7 @@ app.registerExtension({
             function findAllLoaders(nodes) {
                 if (!nodes) return;
                 for (let n of nodes) {
-                    if (n.comfyClass === "Yusu-MultiImageLoader") multiImageLoaders.push(n);
+                    if (n.comfyClass === "YusuMultiImageLoader") multiImageLoaders.push(n);
                     if (n.subgraph?._nodes) findAllLoaders(n.subgraph._nodes);
                 }
             }

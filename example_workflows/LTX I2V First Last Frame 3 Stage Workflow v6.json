@@ -390,7 +390,7 @@
     },
     {
       "id": 381,
-      "type": "Yusu-MultiImageLoader",
+      "type": "YusuMultiImageLoader",
       "pos": [
         3550,
         5950
@@ -417,7 +417,7 @@
       "properties": {
         "cnr_id": "Yusu-WhatDreamsCost-ComfyUI",
         "ver": "ecd00e6b404f14b07c7b54b0b0033e8bccb32d24",
-        "Node name for S&R": "Yusu-MultiImageLoader"
+        "Node name for S&R": "YusuMultiImageLoader"
       },
       "widgets_values": [
         "",
@@ -599,7 +599,7 @@
     },
     {
       "id": 376,
-      "type": "Yusu-LTXSequencer",
+      "type": "YusuLTXSequencer",
       "pos": [
         3920,
         5950
@@ -664,7 +664,7 @@
       "properties": {
         "cnr_id": "Yusu-WhatDreamsCost-ComfyUI",
         "ver": "ecd00e6b404f14b07c7b54b0b0033e8bccb32d24",
-        "Node name for S&R": "Yusu-LTXSequencer",
+        "Node name for S&R": "YusuLTXSequencer",
         "num_images": 0,
         "insert_frame_1": 0,
         "strength_1": 1,
@@ -2816,7 +2816,7 @@
           },
           {
             "id": 409,
-            "type": "Yusu-LTXSequencer",
+            "type": "YusuLTXSequencer",
             "pos": [
               850,
               7140
@@ -2891,7 +2891,7 @@
             "properties": {
               "cnr_id": "Yusu-WhatDreamsCost-ComfyUI",
               "ver": "ecd00e6b404f14b07c7b54b0b0033e8bccb32d24",
-              "Node name for S&R": "Yusu-LTXSequencer",
+              "Node name for S&R": "YusuLTXSequencer",
               "num_images": 0,
               "insert_frame_1": 0,
               "strength_1": 1,
@@ -4689,7 +4689,7 @@
           },
           {
             "id": 411,
-            "type": "Yusu-LTXSequencer",
+            "type": "YusuLTXSequencer",
             "pos": [
               720,
               7110
@@ -4762,7 +4762,7 @@
             "properties": {
               "cnr_id": "Yusu-WhatDreamsCost-ComfyUI",
               "ver": "ecd00e6b404f14b07c7b54b0b0033e8bccb32d24",
-              "Node name for S&R": "Yusu-LTXSequencer",
+              "Node name for S&R": "YusuLTXSequencer",
               "num_images": 0,
               "insert_frame_1": 0,
               "strength_1": 1,

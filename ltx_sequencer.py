@@ -52,9 +52,9 @@ class LTXSequencer(LTXVAddGuide):
             ])
 
         return io.Schema(
-            node_id="Yusu-LTXSequencer",
+            node_id="YusuLTXSequencer",
             display_name="Yusu LTX Sequencer",
-            category="Yusu-WhatDreamsCost",
+            category="Yusu/WhatDreamsCost",
             description="Add multiple guide images at specified frame indices or seconds with strengths. Number of widgets is dynamically configured.",
             inputs=inputs,
             outputs=[

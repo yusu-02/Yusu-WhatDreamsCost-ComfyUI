@@ -36,9 +36,9 @@ class LTXKeyframer(io.ComfyNode):
             ])
 
         return io.Schema(
-            node_id="Yusu-LTXKeyframer",
+            node_id="YusuLTXKeyframer",
             display_name="Yusu LTX Keyframer",
-            category="Yusu-WhatDreamsCost",
+            category="Yusu/WhatDreamsCost",
             description="Replaces video latent frames with the encoded input images. Number of widgets is dynamically configured.",
             inputs=inputs,
             outputs=[

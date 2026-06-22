@@ -5,11 +5,11 @@ from .speech_length_calculator import SpeechLengthCalculator
 from .load_audio_ui import LoadAudioUI
 from .load_video_ui import LoadVideoUI
 from .ltx_director import LTXDirector
-from .ltx_director_guide import LTXDirectorGuide
+from .ltx_director_guide import LTXDirectorGuide, LTXDirectorCropGuides
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
-class YusuWhatDreamsCostExtension(ComfyExtension):
+class PromptRelay(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
@@ -17,29 +17,31 @@ class YusuWhatDreamsCostExtension(ComfyExtension):
             LTXDirectorGuide
         ]
 
-async def comfy_entrypoint() -> YusuWhatDreamsCostExtension:
-    return YusuWhatDreamsCostExtension()
+async def comfy_entrypoint() -> PromptRelay:
+    return PromptRelay()
     
 NODE_CLASS_MAPPINGS = {
-    "Yusu-LTXKeyframer": LTXKeyframer,
-    "Yusu-MultiImageLoader": MultiImageLoader,
-    "Yusu-LTXSequencer": LTXSequencer,
-    "Yusu-SpeechLengthCalculator": SpeechLengthCalculator,
-    "Yusu-LoadAudioUI": LoadAudioUI,
-    "Yusu-LoadVideoUI": LoadVideoUI,
-    "Yusu-LTXDirector": LTXDirector,
-    "Yusu-LTXDirectorGuide": LTXDirectorGuide,
+    "YusuLTXKeyframer": LTXKeyframer,
+    "YusuMultiImageLoader": MultiImageLoader,
+    "YusuLTXSequencer": LTXSequencer,
+    "YusuSpeechLengthCalculator": SpeechLengthCalculator,
+    "YusuLoadAudioUI": LoadAudioUI,
+    "YusuLoadVideoUI": LoadVideoUI,
+    "YusuLTXDirector": LTXDirector,
+    "YusuLTXDirectorGuide": LTXDirectorGuide,
+    "YusuLTXDirectorCropGuides": LTXDirectorCropGuides,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Yusu-LTXKeyframer": "Yusu LTX Keyframer",
-    "Yusu-MultiImageLoader": "Yusu Multi Image Loader",
-    "Yusu-LTXSequencer": "Yusu LTX Sequencer",
-    "Yusu-SpeechLengthCalculator": "Yusu Speech Length Calculator",
-    "Yusu-LoadAudioUI": "Yusu Load Audio UI",
-    "Yusu-LoadVideoUI": "Yusu Load Video UI",
-    "Yusu-LTXDirector": "Yusu LTX Director",
-    "Yusu-LTXDirectorGuide": "Yusu LTX Director Guide",
+    "YusuLTXKeyframer": "Yusu LTX Keyframer",
+    "YusuMultiImageLoader": "Yusu Multi Image Loader",
+    "YusuLTXSequencer": "Yusu LTX Sequencer",
+    "YusuSpeechLengthCalculator": "Yusu Speech Length Calculator",
+    "YusuLoadAudioUI": "Yusu Load Audio UI",
+    "YusuLoadVideoUI": "Yusu Load Video UI",
+    "YusuLTXDirector": "Yusu LTX Director",
+    "YusuLTXDirectorGuide": "Yusu LTX Director Guide",
+    "YusuLTXDirectorCropGuides": "Yusu LTX Director Crop Guides",
 }
 
 WEB_DIRECTORY = "./js"

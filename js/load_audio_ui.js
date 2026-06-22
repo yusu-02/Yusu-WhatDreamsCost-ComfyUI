@@ -2,17 +2,37 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 app.registerExtension({
-    name: "Comfy.Yusu-LoadAudioUI",
+    name: "Comfy.YusuLoadAudioUI",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name === "Yusu-LoadAudioUI") {
+        if (nodeData.name === "YusuLoadAudioUI") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             const onDrawBackground = nodeType.prototype.onDrawBackground;
+            const onConfigure = nodeType.prototype.onConfigure;
+            const onResize = nodeType.prototype.onResize;
             
             // --- V1 LiteGraph Image Preview Hider ---
             nodeType.prototype.onDrawBackground = function (ctx) {
                 if (onDrawBackground) {
                     onDrawBackground.apply(this, arguments);
                 }
+            };
+
+            nodeType.prototype.onResize = function (size) {
+                const out = onResize ? onResize.apply(this, arguments) : undefined;
+                if (this.syncLayoutToNode) {
+                    this.syncLayoutToNode();
+                }
+                return out;
+            };
+
+            nodeType.prototype.onConfigure = function (info) {
+                const out = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+                setTimeout(() => {
+                    if (this.syncLayoutToNode) {
+                        this.syncLayoutToNode();
+                    }
+                }, 0);
+                return out;
             };
             
             nodeType.prototype.onNodeCreated = function () {
@@ -71,7 +91,7 @@ app.registerExtension({
                         const body = new FormData();
                         body.append("image", file);
                         body.append("type", "input");
-                        body.append("subfolder", "");
+                        body.append("subfolder", "whatdreamscost");
                         
                         const resp = await api.fetchApi("/upload/image", {
                             method: "POST",
@@ -246,9 +266,20 @@ app.registerExtension({
                 
                 // --- DEFAULT SIZE FOR NEW NODES ---
                 this.size = [475, this.computeSize()[1]];
+
+                node.syncLayoutToNode = function() {
+                    const nodeWidth = this.size?.[0] || 475;
+                    const targetWidth = Math.max(10, nodeWidth - 30);
+                    if (container) {
+                        container.style.width = `${targetWidth}px`;
+                        container.style.maxWidth = `${targetWidth}px`;
+                        container.style.boxSizing = "border-box";
+                    }
+                };
                 
                 widget.computeSize = function(width) {
-                    return [width, 200];
+                    const nodeWidth = node.size?.[0] || width || 475;
+                    return [Math.max(10, nodeWidth - 30), 200];
                 };
 
                 // 5. Bind Node Data to UI dynamically 
@@ -514,6 +545,8 @@ app.registerExtension({
                     // Exit initialization phase
                     setTimeout(() => { node._initializing = false; }, 500);
 
+                    // Call syncLayoutToNode initially
+                    node.syncLayoutToNode();
                 }, 100);
                 return r;
             }

@@ -2,9 +2,9 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 app.registerExtension({
-    name: "Comfy.Yusu-MultiImageLoader",
+    name: "Comfy.YusuMultiImageLoader",
     async nodeCreated(node) {
-        if (node.comfyClass !== "Yusu-MultiImageLoader") return;
+        if (node.comfyClass !== "YusuMultiImageLoader") return;
 
         // Helper to detect if we are in the new Nodes 2.0 / V3 Web Component frontend
         let v3NodeElement = null;
@@ -101,11 +101,22 @@ app.registerExtension({
         // Add the Widget to the Node
         const galleryWidget = node.addDOMWidget("Gallery", "html_gallery", container, { serialize: false });
         
-        galleryWidget.computeSize = function() {
+        node.syncLayoutToNode = function() {
+            const nodeWidth = this.size?.[0] || 220;
+            const targetWidth = Math.max(10, nodeWidth - 30);
+            if (container) {
+                container.style.width = `${targetWidth}px`;
+                container.style.maxWidth = `${targetWidth}px`;
+                container.style.boxSizing = "border-box";
+            }
+        };
+
+        galleryWidget.computeSize = function(width) {
             const galleryY = this.last_y || 40;
             const minOutputsHeight = (node.outputs ? node.outputs.length : 1) * 20;
             const requiredGalleryHeight = Math.max(250, minOutputsHeight + 40 - galleryY);
-            return [150, requiredGalleryHeight]; // Changed minimum theoretical widget width
+            const nodeWidth = node.size?.[0] || width || 220;
+            return [Math.max(10, nodeWidth - 30), requiredGalleryHeight];
         };
 
         // --- SAFELY HIDE THE IMAGE_PATHS WIDGET ---
@@ -311,6 +322,9 @@ app.registerExtension({
             size[1] = Math.max(size[1], absoluteMinHeight);
 
             if (origOnResize) origOnResize.call(this, size);
+            if (this.syncLayoutToNode) {
+                this.syncLayoutToNode();
+            }
             if (isLayouting) return; 
             
             node.min_size = [minW, absoluteMinHeight];
@@ -318,6 +332,17 @@ app.registerExtension({
             
             const availableGalleryHeight = size[1] - galleryY - paddingBottom;
             container.style.height = availableGalleryHeight + "px";
+        };
+
+        const origOnConfigure = node.onConfigure;
+        node.onConfigure = function(info) {
+            const out = origOnConfigure ? origOnConfigure.apply(this, arguments) : undefined;
+            setTimeout(() => {
+                if (this.syncLayoutToNode) {
+                    this.syncLayoutToNode();
+                }
+            }, 0);
+            return out;
         };
 
         const origComputeSize = node.computeSize;
@@ -683,6 +708,9 @@ app.registerExtension({
             }
         };
 
-        setTimeout(() => refreshGallery(), 100);
+        setTimeout(() => {
+            refreshGallery();
+            node.syncLayoutToNode();
+        }, 100);
     }
 });

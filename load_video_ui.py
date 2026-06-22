@@ -1,4 +1,5 @@
 import os
+import asyncio
 import torch
 import numpy as np
 import folder_paths
@@ -15,6 +16,13 @@ async def custom_view(request):
         return web.FileResponse(file_path)
     return web.Response(status=404, text="File not found")
 
+
+def _read_and_write_file_chunk(file, file_path, mode):
+    chunk_bytes = file.file.read()
+    with open(file_path, mode) as f:
+        f.write(chunk_bytes)
+
+
 # Custom API route for Chunked Uploads to bypass the 413 Payload Too Large error
 @PromptServer.instance.routes.post("/video_ui_upload_chunk")
 async def upload_chunk(request):
@@ -24,16 +32,19 @@ async def upload_chunk(request):
     chunk_index = int(post.get("chunk_index"))
     total_chunks = int(post.get("total_chunks"))
 
-    upload_dir = folder_paths.get_input_directory()
+    upload_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+    os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, filename)
 
     # Append to file if it's not the first chunk, otherwise write new
     mode = "ab" if chunk_index > 0 else "wb"
-    with open(file_path, mode) as f:
-        f.write(file.file.read())
+    
+    # Offload the blocking read/write disk I/O to a thread executor
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _read_and_write_file_chunk, file, file_path, mode)
 
     if chunk_index == total_chunks - 1:
-        return web.json_response({"name": filename})
+        return web.json_response({"name": f"whatdreamscost/{filename}"})
     return web.json_response({"status": "ok"})
 
 
@@ -64,7 +75,7 @@ class LoadVideoUI:
     RETURN_TYPES = ("IMAGE", "AUDIO", "FLOAT", "INT")
     RETURN_NAMES = ("images", "audio", "duration", "frame_count")
     FUNCTION = "load_video"
-    CATEGORY = "Yusu-WhatDreamsCost"
+    CATEGORY = "Yusu/WhatDreamsCost"
 
     def load_video(self, video, frame_rate, display_mode, start_time, end_time, duration, start_frame, end_frame, duration_frames, custom_width=0, custom_height=0, resize_method="maintain aspect ratio", crop_x=0.0, crop_y=0.0, crop_w=1.0, crop_h=1.0, **kwargs):
         if not video:

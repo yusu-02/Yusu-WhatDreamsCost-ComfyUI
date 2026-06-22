@@ -26,7 +26,7 @@ class MultiImageLoader:
     RETURN_TYPES = ("IMAGE",) * 51
     RETURN_NAMES = ("multi_output",) + tuple(f"image_{i+1}" for i in range(50))
     FUNCTION = "load_images"
-    CATEGORY = "Yusu-WhatDreamsCost"
+    CATEGORY = "Yusu/WhatDreamsCost"
 
     def resize_image(self, image, width, height, resize_method="keep proportion", interpolation="nearest", multiple_of=0):
         MAX_RESOLUTION = 8192

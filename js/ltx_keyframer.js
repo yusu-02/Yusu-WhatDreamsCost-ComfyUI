@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-// Global registry to track all Yusu-LTXKeyframer nodes across all subgraphs
+// Global registry to track all YusuLTXKeyframer nodes across all subgraphs
 window._YusuLTXKeyframerGlobalNodes = window._YusuLTXKeyframerGlobalNodes || new Set();
 
 // ComfyUI native trick to cleanly hide/show widgets without deleting them
@@ -23,12 +23,12 @@ function toggleWidget(widget, visible) {
 }
 
 // --- NEW SYNC HELPER FUNCTION ---
-// Finds all other Yusu-LTXKeyframer nodes globally and mirrors the value to them
+// Finds all other YusuLTXKeyframer nodes globally and mirrors the value to them
 function syncWidgetAcrossNodes(sourceNode, widgetName, value) {
     if (!window._YusuLTXKeyframerGlobalNodes) return;
     
     for (const targetNode of window._YusuLTXKeyframerGlobalNodes) {
-        // Target all OTHER Yusu-LTXKeyframer nodes by direct object reference
+        // Target all OTHER YusuLTXKeyframer nodes by direct object reference
         if (targetNode !== sourceNode) {
             
             // 1. Always update the hidden properties cache so it remembers the sync 
@@ -48,9 +48,9 @@ function syncWidgetAcrossNodes(sourceNode, widgetName, value) {
 }
 
 app.registerExtension({
-    name: "Comfy.Yusu-LTXKeyframer.DynamicInputs",
+    name: "Comfy.YusuLTXKeyframer.DynamicInputs",
     async nodeCreated(node) {
-        if (node.comfyClass !== "Yusu-LTXKeyframer") return;
+        if (node.comfyClass !== "YusuLTXKeyframer") return;
 
         // Register this node instance globally
         window._YusuLTXKeyframerGlobalNodes.add(node);
@@ -278,7 +278,7 @@ app.registerExtension({
             this._applyWidgetCount(count);
         };
 
-        // Helper: read image count from a connected Yusu-MultiImageLoader node
+        // Helper: read image count from a connected YusuMultiImageLoader node
         function readSourceImageCount(self) {
             const multiInput = self.inputs?.find(inp => inp.name === "multi_input");
             if (!multiInput || !multiInput.link) return null;
@@ -296,7 +296,7 @@ app.registerExtension({
                 const originNode = graph.getNodeById(link.origin_id);
                 if (!originNode) return null;
 
-                if (originNode.comfyClass === "Yusu-MultiImageLoader") {
+                if (originNode.comfyClass === "YusuMultiImageLoader") {
                     return originNode;
                 }
 
@@ -311,7 +311,7 @@ app.registerExtension({
                 if (typeof originNode.getInnerNode === "function") {
                     try {
                         const innerNode = originNode.getInnerNode(link.origin_slot);
-                        if (innerNode && innerNode.comfyClass === "Yusu-MultiImageLoader") {
+                        if (innerNode && innerNode.comfyClass === "YusuMultiImageLoader") {
                             return innerNode;
                         }
                     } catch (e) {
@@ -340,12 +340,12 @@ app.registerExtension({
 
             // Fallback Strategy: If it is connected to something, but we couldn't resolve it
             // directly (e.g. complex nested 3rd party subgraphs), scan the entire UI.
-            // If there is EXACTLY ONE Yusu-MultiImageLoader in the workspace, safely assume that's the one.
+            // If there is EXACTLY ONE YusuMultiImageLoader in the workspace, safely assume that's the one.
             let multiImageLoaders = [];
             function findAllLoaders(nodes) {
                 if (!nodes) return;
                 for (let n of nodes) {
-                    if (n.comfyClass === "Yusu-MultiImageLoader") {
+                    if (n.comfyClass === "YusuMultiImageLoader") {
                         multiImageLoaders.push(n);
                     }
                     if (n.subgraph && n.subgraph._nodes) {
