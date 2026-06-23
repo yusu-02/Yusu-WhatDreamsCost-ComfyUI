@@ -1,6 +1,6 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
-import { calculateTimelineDurationFrames, pushOverlappingSegmentsForward } from "./timeline_duration.js";
+import { calculatePlaybackDurationFrames, calculateTimelineDurationFrames, pushOverlappingSegmentsForward } from "./timeline_duration.js";
 import { clampSegmentLengthToSource } from "./director_video_segments.js";
 
 // --- UI Constants & Configuration ---
@@ -1395,6 +1395,13 @@ class TimelineEditor {
     const outputDuration = this.getDurationFrames();
     if (furthest <= 0) return outputDuration;
     return Math.max(outputDuration, Math.ceil(furthest * 1.30));
+  }
+
+  getPlaybackDurationFrames() {
+    if (this.retakeMode) {
+      return this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames()) : this.getDurationFrames();
+    }
+    return calculatePlaybackDurationFrames(this.getDurationFrames(), this.getVisualDurationFrames());
   }
 
   // Sync the zoom slider's max attribute to the current getMaxZoom() value,
@@ -3144,12 +3151,10 @@ class TimelineEditor {
     this.seekBar.style.flex = "1"; // take up remaining space
     this.seekBar.addEventListener("input", (e) => {
       let val = parseInt(e.target.value, 10);
-      if (this.retakeMode && this.timeline.retakeVideo) {
-        const baseVideoDur = this.timeline.retakeVideo.videoDurationFrames || 0;
-        if (val > baseVideoDur) {
-          val = baseVideoDur;
-          this.seekBar.value = val;
-        }
+      const maxFrame = this.getPlaybackDurationFrames();
+      if (val > maxFrame) {
+        val = maxFrame;
+        this.seekBar.value = val;
       }
       this.currentFrame = val;
       this.updateSeekBarBackground();
@@ -7589,9 +7594,10 @@ class TimelineEditor {
       this._dragType = "playhead";
       const logicalWidth = this.canvas.offsetWidth;
       const totalFrames = this.getVisualDurationFrames();
+      const playbackFrames = this.getPlaybackDurationFrames();
       let mouseFrameX = x * (totalFrames / logicalWidth);
       mouseFrameX = this.getSnappedPlayhead(mouseFrameX, logicalWidth);
-      this.currentFrame = clamp(mouseFrameX, 0, totalFrames);
+      this.currentFrame = clamp(mouseFrameX, 0, playbackFrames);
       this._liveScrubPlayhead();
       this.render();
       if (this.isPlaying) {
@@ -8037,9 +8043,10 @@ class TimelineEditor {
       this.canvas.style.cursor = "ew-resize";
       const logicalWidth = this.canvas.offsetWidth;
       const totalFrames = this.getVisualDurationFrames();
+      const playbackFrames = this.getPlaybackDurationFrames();
       let mouseFrameX = mouseX * (totalFrames / logicalWidth);
       mouseFrameX = this.getSnappedPlayhead(mouseFrameX, logicalWidth);
-      this.currentFrame = clamp(mouseFrameX, 0, totalFrames);
+      this.currentFrame = clamp(mouseFrameX, 0, playbackFrames);
       this._liveScrubPlayhead();
       this.render();
       if (this.isPlaying) {
@@ -9004,6 +9011,14 @@ class TimelineEditor {
     }
     if (this.timeline.motionSegments) {
       this.timeline.motionSegments = this.timeline.motionSegments.filter((seg, index, self) => index === self.findIndex((s) => s.id === seg.id));
+    }
+
+    if (!this.retakeMode && [
+      ...(this.timeline.segments || []),
+      ...(this.timeline.audioSegments || []),
+      ...(this.timeline.motionSegments || []),
+    ].length > 0) {
+      this.syncDurationToTimelineSegments();
     }
 
     let sortedSegments = [...this.timeline.segments].sort((a, b) => a.start - b.start);
@@ -11087,7 +11102,8 @@ class TimelineEditor {
       this.loopBtn.classList.remove("active");
     }
     if (this.seekBar) {
-      this.seekBar.max = this.getVisualDurationFrames();
+      this.seekBar.max = this.getPlaybackDurationFrames();
+      if (this.currentFrame > this.getPlaybackDurationFrames()) this.currentFrame = this.getPlaybackDurationFrames();
       this.seekBar.value = this.currentFrame;
       this.updateSeekBarBackground();
     }
@@ -11100,9 +11116,7 @@ class TimelineEditor {
     if (this.isPlaying) {
       this.pauseAudio();
     } else {
-      const playMax = this.retakeMode 
-        ? (this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames()) : this.getDurationFrames())
-        : this.getVisualDurationFrames();
+      const playMax = this.getPlaybackDurationFrames();
       if (this.currentFrame >= playMax) {
         this.currentFrame = 0;
       }
@@ -11309,18 +11323,8 @@ class TimelineEditor {
 
       this.currentFrame = this.playbackStartFrame + elapsedFrames;
 
-      const visualDurationFrames = this.getVisualDurationFrames();
-      const durationFrames = this.getDurationFrames();
-
-      let loopBound, stopBound;
-      if (this.retakeMode) {
-        const retakeLimit = this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || durationFrames) : durationFrames;
-        loopBound = retakeLimit;
-        stopBound = retakeLimit;
-      } else {
-        loopBound = (this.playbackStartFrame >= durationFrames) ? visualDurationFrames : durationFrames;
-        stopBound = visualDurationFrames;
-      }
+      const loopBound = this.getPlaybackDurationFrames();
+      const stopBound = loopBound;
 
       if (this.isLooping) {
         if (this.currentFrame >= loopBound) {

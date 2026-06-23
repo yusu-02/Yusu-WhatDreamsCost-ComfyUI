@@ -11,6 +11,10 @@ export function calculateTimelineDurationFrames(baseFrames, ...segmentGroups) {
   return Math.max(1, furthest);
 }
 
+export function calculatePlaybackDurationFrames(outputFrames, visualFrames) {
+  return Math.max(1, Math.ceil(Number(outputFrames) || Number(visualFrames) || 1));
+}
+
 export function pushOverlappingSegmentsForward(segments, anchorId) {
   if (!Array.isArray(segments) || !anchorId) return 0;
 

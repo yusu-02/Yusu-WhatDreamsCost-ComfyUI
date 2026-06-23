@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calculateTimelineDurationFrames, pushOverlappingSegmentsForward } from "../js/timeline_duration.js";
+import {
+  calculatePlaybackDurationFrames,
+  calculateTimelineDurationFrames,
+  pushOverlappingSegmentsForward,
+} from "../js/timeline_duration.js";
 
 test("timeline duration follows the furthest media segment", () => {
   assert.equal(calculateTimelineDurationFrames(48, [
@@ -23,4 +27,8 @@ test("duration edits push later overlapping segments forward", () => {
     ["b", 120],
     ["c", 144],
   ]);
+});
+
+test("playback duration ignores visual padding", () => {
+  assert.equal(calculatePlaybackDurationFrames(360, 468), 360);
 });
