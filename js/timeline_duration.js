@@ -10,3 +10,23 @@ export function calculateTimelineDurationFrames(baseFrames, ...segmentGroups) {
   }
   return Math.max(1, furthest);
 }
+
+export function pushOverlappingSegmentsForward(segments, anchorId) {
+  if (!Array.isArray(segments) || !anchorId) return 0;
+
+  segments.sort((a, b) => (Number(a?.start) || 0) - (Number(b?.start) || 0));
+  const anchorIndex = segments.findIndex((seg) => seg?.id === anchorId);
+  if (anchorIndex === -1) return 0;
+
+  let moved = 0;
+  for (let i = anchorIndex + 1; i < segments.length; i++) {
+    const prev = segments[i - 1];
+    const current = segments[i];
+    const minStart = (Number(prev?.start) || 0) + (Number(prev?.length) || 0);
+    if ((Number(current?.start) || 0) < minStart) {
+      current.start = minStart;
+      moved++;
+    }
+  }
+  return moved;
+}

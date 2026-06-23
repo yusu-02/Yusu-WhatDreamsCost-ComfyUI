@@ -1,6 +1,6 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
-import { calculateTimelineDurationFrames } from "./timeline_duration.js";
+import { calculateTimelineDurationFrames, pushOverlappingSegmentsForward } from "./timeline_duration.js";
 import { clampSegmentLengthToSource } from "./director_video_segments.js";
 
 // --- UI Constants & Configuration ---
@@ -5313,15 +5313,23 @@ class TimelineEditor {
       seg.length = clampSegmentLengthToSource(seg);
     }
 
+    const segId = seg.id;
     const siblingId = String(seg.id || "").endsWith("_v")
       ? String(seg.id).slice(0, -2) + "_a"
       : String(seg.id || "").endsWith("_a")
         ? String(seg.id).slice(0, -2) + "_v"
         : null;
+    let sibling = null;
+    let siblingArray = null;
     if (siblingId) {
-      const sibling = [...(this.timeline.segments || []), ...(this.timeline.audioSegments || [])].find(s => s.id === siblingId);
+      siblingArray = siblingId.endsWith("_a") ? this.timeline.audioSegments : this.timeline.segments;
+      sibling = siblingArray?.find(s => s.id === siblingId);
       if (sibling) sibling.length = seg.length;
     }
+
+    pushOverlappingSegmentsForward(arr, segId);
+    if (sibling && siblingArray) pushOverlappingSegmentsForward(siblingArray, sibling.id);
+    this.selectedIndex = arr.findIndex(s => s.id === segId);
 
     this.syncDurationToTimelineSegments();
     this.updateUIFromSelection();
