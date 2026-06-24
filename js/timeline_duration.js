@@ -19,18 +19,43 @@ export function pushOverlappingSegmentsForward(segments, anchorId) {
   if (!Array.isArray(segments) || !anchorId) return 0;
 
   segments.sort((a, b) => (Number(a?.start) || 0) - (Number(b?.start) || 0));
-  const anchorIndex = segments.findIndex((seg) => seg?.id === anchorId);
-  if (anchorIndex === -1) return 0;
+  const anchor = segments.find((seg) => seg?.id === anchorId);
+  if (!anchor) return 0;
 
+  const anchorStart = Number(anchor.start) || 0;
+  let cursor = anchorStart + (Number(anchor.length) || 0);
   let moved = 0;
-  for (let i = anchorIndex + 1; i < segments.length; i++) {
-    const prev = segments[i - 1];
-    const current = segments[i];
-    const minStart = (Number(prev?.start) || 0) + (Number(prev?.length) || 0);
-    if ((Number(current?.start) || 0) < minStart) {
-      current.start = minStart;
+  for (const current of segments) {
+    if (current?.id === anchorId) continue;
+    const start = Number(current?.start) || 0;
+    const length = Number(current?.length) || 0;
+    if (start + length <= anchorStart) continue;
+    if (start < cursor) {
+      current.start = cursor;
       moved++;
     }
+    cursor = (Number(current?.start) || 0) + length;
   }
+  segments.sort((a, b) => (Number(a?.start) || 0) - (Number(b?.start) || 0));
+  return moved;
+}
+
+export function pullSegmentsAfterShrink(segments, oldEnd, newEnd, anchorId) {
+  const delta = Math.max(0, Math.round((Number(oldEnd) || 0) - (Number(newEnd) || 0)));
+  if (!Array.isArray(segments) || delta <= 0) return 0;
+
+  segments.sort((a, b) => (Number(a?.start) || 0) - (Number(b?.start) || 0));
+  let moved = 0;
+  let cursor = Number(newEnd) || 0;
+  for (const seg of segments) {
+    if (!seg || seg.id === anchorId) continue;
+    const start = Number(seg.start) || 0;
+    if (start < newEnd) continue;
+    const nextStart = Math.max(cursor, start - delta);
+    if (nextStart !== start) moved++;
+    seg.start = nextStart;
+    cursor = seg.start + (Number(seg.length) || 0);
+  }
+  segments.sort((a, b) => (Number(a?.start) || 0) - (Number(b?.start) || 0));
   return moved;
 }

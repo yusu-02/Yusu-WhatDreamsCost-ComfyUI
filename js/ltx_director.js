@@ -1,6 +1,6 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
-import { calculatePlaybackDurationFrames, calculateTimelineDurationFrames, pushOverlappingSegmentsForward } from "./timeline_duration.js";
+import { calculatePlaybackDurationFrames, calculateTimelineDurationFrames, pullSegmentsAfterShrink, pushOverlappingSegmentsForward } from "./timeline_duration.js";
 import { clampSegmentLengthToSource } from "./director_video_segments.js";
 
 // --- UI Constants & Configuration ---
@@ -5313,10 +5313,12 @@ class TimelineEditor {
       return;
     }
 
+    const oldEnd = seg.start + seg.length;
     seg.length = Math.max(MIN_SEGMENT_LENGTH, Math.round(seconds * this.getFrameRate()));
     if (seg.videoDurationFrames || seg.audioDurationFrames) {
       seg.length = clampSegmentLengthToSource(seg);
     }
+    const newEnd = seg.start + seg.length;
 
     const segId = seg.id;
     const siblingId = String(seg.id || "").endsWith("_v")
@@ -5332,8 +5334,12 @@ class TimelineEditor {
       if (sibling) sibling.length = seg.length;
     }
 
+    pullSegmentsAfterShrink(arr, oldEnd, newEnd, segId);
     pushOverlappingSegmentsForward(arr, segId);
-    if (sibling && siblingArray) pushOverlappingSegmentsForward(siblingArray, sibling.id);
+    if (sibling && siblingArray) {
+      pullSegmentsAfterShrink(siblingArray, oldEnd, newEnd, sibling.id);
+      pushOverlappingSegmentsForward(siblingArray, sibling.id);
+    }
     this.selectedIndex = arr.findIndex(s => s.id === segId);
 
     this.syncDurationToTimelineSegments();
@@ -5393,6 +5399,7 @@ class TimelineEditor {
     if (!targetSeg) return false;
     this.fitSegmentsToTarget(targetSeg, [seg]);
     const arr = this.getSegmentArray("image");
+    pushOverlappingSegmentsForward(arr, seg.id);
     arr.sort((a, b) => a.start - b.start);
     this.selectionType = "image";
     this.selectedIndex = arr.findIndex(s => s.id === seg.id);
@@ -9900,12 +9907,14 @@ class TimelineEditor {
 
     let fitToAudioBtn = null;
     let fitToVisualBtn = null;
-    if (trackType === "image") {
+    const canonicalTrack = this.getCanonicalTrack(trackType);
+    if (canonicalTrack === "image") {
+      const segLabel = seg.type === "text" ? "Text" : "Image";
       const overlappingAudio = this.getOverlappingAudioSegment(seg);
       if (overlappingAudio) {
         fitToAudioBtn = document.createElement("button");
         fitToAudioBtn.className = "pr-gap-menu-btn";
-        fitToAudioBtn.innerHTML = `Fit Image to Audio`;
+        fitToAudioBtn.innerHTML = `Fit ${segLabel} to Audio`;
         fitToAudioBtn.onclick = () => {
           this.alignSelectedImageToTarget(seg, overlappingAudio);
           this.dismissContextMenu();
@@ -9915,7 +9924,7 @@ class TimelineEditor {
       if (overlappingVisual) {
         fitToVisualBtn = document.createElement("button");
         fitToVisualBtn.className = "pr-gap-menu-btn";
-        fitToVisualBtn.innerHTML = `Fit Image to Visual`;
+        fitToVisualBtn.innerHTML = `Fit ${segLabel} to Visual`;
         fitToVisualBtn.onclick = () => {
           this.alignSelectedImageToTarget(seg, overlappingVisual);
           this.dismissContextMenu();
