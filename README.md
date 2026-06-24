@@ -17,6 +17,13 @@ The original project and its original features were created by WhatDreamsCost. T
 - Improved the custom audio pipeline: automatic custom-audio enabling, mix peak protection, and audio reference token injection into conditioning.
 - Kept the original base node functionality while moving node IDs into the independent Yusu namespace.
 
+## Recent Fixes
+
+- Fixed right-click fitting for text segments, so text can now be aligned with audio, visual, and IC video segments.
+- Fixed fitted image/text segments covering other main-track segments by pushing overlapping segments forward.
+- Fixed duration shrink edits leaving empty gaps by pulling later image/text segments forward.
+- Fixed timeline playback bounds so the playhead and seek bar follow the real media duration instead of the visual padding area.
+
 ## Node Namespace
 
 This fork registers the following Yusu node IDs:
