@@ -7,11 +7,12 @@ tree = ast.parse(source.read_text(encoding="utf-8"))
 funcs = {
     node.name: ast.unparse(node)
     for node in tree.body
-    if isinstance(node, ast.FunctionDef) and node.name.startswith("_ltxv_")
+    if isinstance(node, ast.FunctionDef) and (node.name.startswith("_ltxv_") or node.name == "_dummy_guide_source_dimensions")
 }
 ns = {"math": __import__("math")}
 exec(funcs["_ltxv_pixel_frames"], ns)
 exec(funcs["_ltxv_latent_frames"], ns)
+exec(funcs["_dummy_guide_source_dimensions"], ns)
 
 
 assert ns["_ltxv_pixel_frames"](1) == 9
@@ -20,3 +21,5 @@ assert ns["_ltxv_latent_frames"](9) == 1
 assert ns["_ltxv_pixel_frames"](149) == 153
 assert ns["_ltxv_latent_frames"](153) == 19
 assert ns["_ltxv_latent_frames"](153) * 8 + 1 == 153
+assert ns["_dummy_guide_source_dimensions"]() == (768, 512)
+assert ns["_dummy_guide_source_dimensions"](832, 480) == (832, 480)

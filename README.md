@@ -19,6 +19,7 @@ The original project and its original features were created by WhatDreamsCost. T
 
 ## Recent Fixes
 
+- 2026-06-26: Fixed IC-LoRA reference videos incorrectly controlling the output canvas size. Director output now follows the LTX Director custom width and height settings.
 - Fixed right-click fitting for text segments, so text can now be aligned with audio, visual, and IC video segments.
 - Fixed fitted image/text segments covering other main-track segments by pushing overlapping segments forward.
 - Fixed duration shrink edits leaving empty gaps by pulling later image/text segments forward.

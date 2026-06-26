@@ -746,6 +746,10 @@ def _ltxv_latent_frames(pixel_frames: int) -> int:
     return max(1, (max(1, int(pixel_frames)) - 1) // 8)
 
 
+def _dummy_guide_source_dimensions(custom_width=0, custom_height=0):
+    return custom_width if custom_width > 0 else 768, custom_height if custom_height > 0 else 512
+
+
 def _add_audio_ref_tokens(conditioning, audio_latent):
     b, c, t, f = audio_latent.shape
     ref_audio = {"tokens": audio_latent.permute(0, 2, 1, 3).reshape(b, t, c * f)}
@@ -1098,12 +1102,10 @@ class LTXDirector(io.ComfyNode):
             # If no images were loaded from the timeline, create a dummy image at strength 0
             # to prevent artifacts in text-to-video mode.
             if not guide_data["images"] and optional_latent is None:
-                src_w = derived_w if derived_w > 0 else 768
-                src_h = derived_h if derived_h > 0 else 512
+                src_w, src_h = _dummy_guide_source_dimensions(custom_width, custom_height)
                 
-                # If there's an IC-LoRA video or retake base video on the timeline, extract its dimensions for accurate aspect ratio scaling
+                # Retake base video may define the base canvas. IC-LoRA reference videos must not.
                 tdata_motion = json.loads(timeline_data) if timeline_data else {}
-                found_dims = False
                 
                 # Check for retake base video first
                 is_retake = tdata_motion.get("retakeMode", False)
@@ -1122,31 +1124,8 @@ class LTXDirector(io.ComfyNode):
                                 stream = container.streams.video[0]
                                 src_w = stream.width or stream.codec_context.width
                                 src_h = stream.height or stream.codec_context.height
-                                found_dims = True
                         except:
                             pass
-                
-                # Fallback to normal motion segments
-                if not found_dims:
-                    for mseg in tdata_motion.get("motionSegments", []):
-                        v_file = mseg.get("videoFile")
-                        if v_file:
-                            v_path = os.path.join(folder_paths.get_input_directory(), v_file)
-                            if not os.path.exists(v_path):
-                                basename = os.path.basename(v_file)
-                                fallback_path = os.path.join(folder_paths.get_input_directory(), "whatdreamscost", basename)
-                                if os.path.exists(fallback_path):
-                                    v_path = fallback_path
-                            if os.path.exists(v_path):
-                                try:
-                                    with av.open(v_path) as container:
-                                        stream = container.streams.video[0]
-                                        src_w = stream.width or stream.codec_context.width
-                                        src_h = stream.height or stream.codec_context.height
-                                        found_dims = True
-                                        break
-                                except:
-                                    pass
 
                 # Create a dummy tensor of the exact source dimensions
                 tensor = torch.zeros((1, src_h, src_w, 3), dtype=torch.float32)
