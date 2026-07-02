@@ -88,8 +88,12 @@ test("shrinking preserves existing gap after the old end", () => {
   assert.equal(segments.find((seg) => seg.id === "b").start, 48);
 });
 
-test("playback duration ignores visual padding", () => {
-  assert.equal(calculatePlaybackDurationFrames(360, 468), 360);
+test("playback duration extends to media after the output range", () => {
+  assert.equal(calculatePlaybackDurationFrames(360, 468), 468);
+});
+
+test("playback duration keeps output range when media is shorter", () => {
+  assert.equal(calculatePlaybackDurationFrames(360, 240), 360);
 });
 
 test("selection range uses timeline segment length, not source media length", () => {

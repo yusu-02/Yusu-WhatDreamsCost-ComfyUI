@@ -15,8 +15,10 @@ export function shouldAutoSyncDuration(manualOutputRange) {
   return manualOutputRange !== true;
 }
 
-export function calculatePlaybackDurationFrames(outputFrames, visualFrames) {
-  return Math.max(1, Math.ceil(Number(outputFrames) || Number(visualFrames) || 1));
+export function calculatePlaybackDurationFrames(outputFrames, contentFrames) {
+  const output = Math.ceil(Number(outputFrames) || 0);
+  const content = Math.ceil(Number(contentFrames) || 0);
+  return Math.max(1, output, content);
 }
 
 export function calculateSegmentRange(segments) {

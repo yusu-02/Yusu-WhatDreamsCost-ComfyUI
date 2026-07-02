@@ -1405,11 +1405,23 @@ class TimelineEditor {
     return Math.max(outputDuration, Math.ceil(furthest * 1.30));
   }
 
-  getPlaybackDurationFrames() {
+  getSeekableDurationFrames() {
     if (this.retakeMode) {
-      return this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames()) : this.getDurationFrames();
+      if (!this.timeline.retakeVideo) return this.getDurationFrames();
+      return Math.max(1, this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames());
     }
-    return calculatePlaybackDurationFrames(this.getDurationFrames(), this.getVisualDurationFrames());
+
+    const contentDuration = calculateTimelineDurationFrames(
+      this.getDurationFrames(),
+      this.timeline.segments,
+      this.timeline.audioSegments,
+      this.timeline.motionSegments,
+    );
+    return Math.max(1, contentDuration);
+  }
+
+  getPlaybackDurationFrames() {
+    return calculatePlaybackDurationFrames(this.getDurationFrames(), this.getSeekableDurationFrames());
   }
 
   // Sync the zoom slider's max attribute to the current getMaxZoom() value,
