@@ -11,8 +11,46 @@ export function calculateTimelineDurationFrames(baseFrames, ...segmentGroups) {
   return Math.max(1, furthest);
 }
 
+export function shouldAutoSyncDuration(manualOutputRange) {
+  return manualOutputRange !== true;
+}
+
 export function calculatePlaybackDurationFrames(outputFrames, visualFrames) {
   return Math.max(1, Math.ceil(Number(outputFrames) || Number(visualFrames) || 1));
+}
+
+export function calculateSegmentRange(segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return null;
+  let start = Infinity;
+  let end = -Infinity;
+  for (const seg of segments) {
+    if (!seg) continue;
+    const segStart = Number(seg.start) || 0;
+    const segLength = Number(seg.length) || 0;
+    start = Math.min(start, segStart);
+    end = Math.max(end, segStart + segLength);
+  }
+  if (start === Infinity || end === -Infinity) return null;
+  start = Math.round(start);
+  end = Math.max(start + 1, Math.round(end));
+  return { start, end, duration: end - start };
+}
+
+export function splitSegmentTailAfterShrink(seg, newLength, tailId) {
+  const oldLength = Math.round(Number(seg?.length) || 0);
+  const leftLength = Math.max(1, Math.round(Number(newLength) || 1));
+  const tailLength = oldLength - leftLength;
+  if (!seg || tailLength <= 0) return null;
+
+  const tail = {
+    ...seg,
+    id: tailId,
+    start: (Number(seg.start) || 0) + leftLength,
+    length: tailLength,
+    trimStart: (Number(seg.trimStart) || 0) + leftLength,
+  };
+  seg.length = leftLength;
+  return tail;
 }
 
 export function pushOverlappingSegmentsForward(segments, anchorId) {

@@ -1,6 +1,6 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
-import { calculatePlaybackDurationFrames, calculateTimelineDurationFrames, pullSegmentsAfterShrink, pushOverlappingSegmentsForward } from "./timeline_duration.js";
+import { calculatePlaybackDurationFrames, calculateSegmentRange, calculateTimelineDurationFrames, pullSegmentsAfterShrink, pushOverlappingSegmentsForward, shouldAutoSyncDuration, splitSegmentTailAfterShrink } from "./timeline_duration.js";
 import { clampSegmentLengthToSource } from "./director_video_segments.js";
 
 // --- UI Constants & Configuration ---
@@ -317,6 +317,9 @@ const STYLES = `
     gap: 4px;
     z-index: 9999;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
   .pr-gap-menu-btn {
     background: #2a2a2a;
@@ -669,6 +672,7 @@ function parseInitial(jsonStr) {
     propHeight: 90,
     globalPropHeight: 60,
     showFilenames: true,
+    manualOutputRange: false,
     overrideAudio: false,
     inpaint_audio: true,
     retakeMode: false,
@@ -692,6 +696,7 @@ function parseInitial(jsonStr) {
       if (p.propHeight !== undefined) parsed.propHeight = p.propHeight;
       if (p.globalPropHeight !== undefined) parsed.globalPropHeight = p.globalPropHeight;
       if (p.showFilenames !== undefined) parsed.showFilenames = p.showFilenames;
+      if (p.manualOutputRange !== undefined) parsed.manualOutputRange = !!p.manualOutputRange;
       if (p.overrideAudio !== undefined) {
         parsed.overrideAudio = p.overrideAudio;
         parsed._hasOverrideAudio = true;
@@ -832,7 +837,6 @@ class TimelineEditor {
     this.timelineDataWidget = this.node.widgets.find(w => w.name === "timeline_data");
     this.localPromptsWidget = this.node.widgets.find(w => w.name === "local_prompts");
     this.segmentLengthsWidget = this.node.widgets.find(w => w.name === "segment_lengths");
-    this.transitionSmoothnessWidget = this.node.widgets.find(w => w.name === "transition_smoothness");
     this.guideStrengthWidget = this.node.widgets.find(w => w.name === "guide_strength");
     this.displayModeWidget = this.node.widgets.find(w => w.name === "display_mode");
 
@@ -843,7 +847,6 @@ class TimelineEditor {
     this._prevStartFrames = this.getStartFrames();
     this._prevStartSeconds = this.startSecondsWidget ? this.startSecondsWidget.value : 0;
 
-    console.log("[LTXDirector debug] Constructor: timelineDataWidget value:", this.timelineDataWidget?.value);
     this.timeline = parseInitial(this.timelineDataWidget?.value);
     this.retakeMode = this.timeline.retakeMode === true;
     if (this.retakeMode) {
@@ -857,12 +860,11 @@ class TimelineEditor {
         this.node.properties.global_prompt = this.timeline.global_prompt;
       }
     }
-    console.log("[LTXDirector debug] Constructor: parsed timeline:", JSON.stringify(this.timeline));
-
     // Treat this.timeline (from timeline_data widget) as the absolute source of truth!
     this.mainTrackEnabled = this.timeline.mainTrackEnabled !== false;
     this.audioTrackEnabled = this.timeline.audioTrackEnabled !== false;
     this.motionTrackEnabled = this.timeline.motionTrackEnabled !== false;
+    this.manualOutputRange = this.timeline.manualOutputRange === true;
 
     // Sync the properties dictionary too so they match
     this.node.properties.mainTrackEnabled = this.mainTrackEnabled;
@@ -1286,6 +1288,7 @@ class TimelineEditor {
   // Grow the timeline duration to fit `requiredFrames` if it is currently shorter.
   // The timeline only ever grows — never shrinks — through this method.
   growTimelineIfNeeded(requiredFrames) {
+    if (!shouldAutoSyncDuration(this.manualOutputRange)) return;
     const current = this.getDurationFrames();
     if (requiredFrames <= current) return; // already big enough
 
@@ -1316,6 +1319,11 @@ class TimelineEditor {
     if (this.endFramesWidget) this.endFramesWidget.value = this.getStartFrames() + totalFrames;
     if (this.endSecondsWidget) this.endSecondsWidget.value = parseFloat((this.endFramesWidget.value / this.getFrameRate()).toFixed(3));
     return totalFrames;
+  }
+
+  syncDurationToTimelineSegmentsIfAuto() {
+    if (!shouldAutoSyncDuration(this.manualOutputRange)) return this.getDurationFrames();
+    return this.syncDurationToTimelineSegments();
   }
 
   // Force all start/end/duration widgets to match the retake video's duration exactly.
@@ -2176,26 +2184,12 @@ class TimelineEditor {
         e.stopImmediatePropagation();
         e.preventDefault();
       } else if ((e.key === "i" || e.key === "I") && !isCtrl && this._isHovering) {
-        if (this.startFramesWidget) {
-          this.startFramesWidget.value = this.currentFrame;
-          if (this.startFramesWidget.callback) {
-            this.startFramesWidget.callback(this.currentFrame);
-          }
-          this.commitChanges();
-          this.render();
-        }
+        this.setStartAtPlayhead();
         e.stopPropagation();
         e.stopImmediatePropagation();
         e.preventDefault();
       } else if ((e.key === "o" || e.key === "O") && !isCtrl && this._isHovering) {
-        if (this.endFramesWidget) {
-          this.endFramesWidget.value = this.currentFrame;
-          if (this.endFramesWidget.callback) {
-            this.endFramesWidget.callback(this.currentFrame);
-          }
-          this.commitChanges();
-          this.render();
-        }
+        this.setEndAtPlayhead();
         e.stopPropagation();
         e.stopImmediatePropagation();
         e.preventDefault();
@@ -2572,14 +2566,7 @@ class TimelineEditor {
     startBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (this.retakeMode) return;
-      if (this.startFramesWidget) {
-        this.startFramesWidget.value = this.currentFrame;
-        if (this.startFramesWidget.callback) {
-          this.startFramesWidget.callback(this.currentFrame);
-        }
-        this.commitChanges();
-        this.render();
-      }
+      this.setStartAtPlayhead();
     });
 
     const endBtn = document.createElement("button");
@@ -2596,14 +2583,7 @@ class TimelineEditor {
     endBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (this.retakeMode) return;
-      if (this.endFramesWidget) {
-        this.endFramesWidget.value = this.currentFrame;
-        if (this.endFramesWidget.callback) {
-          this.endFramesWidget.callback(this.currentFrame);
-        }
-        this.commitChanges();
-        this.render();
-      }
+      this.setEndAtPlayhead();
     });
 
     const markBtn = document.createElement("button");
@@ -3266,19 +3246,6 @@ class TimelineEditor {
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
 
-    this.transitionLabel = document.createElement("span");
-    this.transitionLabel.className = "pr-strength-label";
-    this.transitionLabel.textContent = "Transition:";
-    this.transitionLabel.style.marginLeft = "10px";
-
-    this.transitionValue = document.createElement("input");
-    this.transitionValue.type = "text";
-    this.transitionValue.className = "pr-strength-input";
-    this.transitionValue.value = "0.00";
-    this.transitionValue.style.width = "42px";
-    this.transitionValue.style.cursor = "ew-resize";
-    this.transitionValue.title = "Per-segment transition smoothness: 0.00 = hard cut, 1.00 = smooth blend";
-
     this.vidStrLabel = document.createElement("span");
     this.vidStrLabel.className = "pr-strength-label";
     this.vidStrLabel.textContent = "Video Strength:";
@@ -3337,6 +3304,20 @@ class TimelineEditor {
       display: "none",
     });
     this.cropCutBtn.addEventListener("click", () => this.cutSelectedSegmentAtPlayhead());
+
+    this.manualOutputRangeBtn = document.createElement("button");
+    this.manualOutputRangeBtn.className = "pr-btn";
+    Object.assign(this.manualOutputRangeBtn.style, {
+      padding: "4px 8px",
+      marginLeft: "8px",
+      fontSize: "10px",
+      height: "24px",
+      whiteSpace: "nowrap",
+    });
+    this.manualOutputRangeBtn.addEventListener("click", () => {
+      this.setManualOutputRange(!this.manualOutputRange);
+    });
+    this.updateManualOutputRangeToggle();
 
     this.vidStrValue.addEventListener("change", (e) => {
       let val = parseFloat(e.target.value);
@@ -3526,49 +3507,10 @@ class TimelineEditor {
       }
     });
 
-    const setSelectedTransition = (rawValue) => {
-      let val = parseFloat(rawValue);
-      if (isNaN(val)) val = 0;
-      val = Math.max(0, Math.min(1, val));
-      this.transitionValue.value = val.toFixed(2);
-      if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
-        this.timeline.segments[this.selectedIndex].transitionSmoothness = val;
-        this.commitChanges();
-      }
-    };
-
-    this.transitionValue.addEventListener("change", (e) => setSelectedTransition(e.target.value));
-    this.transitionValue.addEventListener("mousedown", (e) => {
-      if (this.transitionValue.disabled) return;
-      const startX = e.clientX;
-      const startVal = parseFloat(this.transitionValue.value) || 0.0;
-      let moved = false;
-      const onMouseMove = (moveEvent) => {
-        const deltaX = moveEvent.clientX - startX;
-        if (Math.abs(deltaX) > 3) moved = true;
-        if (moved) {
-          moveEvent.preventDefault();
-          setSelectedTransition(startVal + deltaX * 0.002);
-        }
-      };
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-        if (!moved) {
-          this.transitionValue.focus();
-          this.transitionValue.select();
-        }
-      };
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    });
-
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
     this.strengthRow.appendChild(this.strengthLabel);
     this.strengthRow.appendChild(this.strengthValue);
-    this.strengthRow.appendChild(this.transitionLabel);
-    this.strengthRow.appendChild(this.transitionValue);
     this.strengthRow.appendChild(this.vidStrLabel);
     this.strengthRow.appendChild(this.vidStrValue);
     this.strengthRow.appendChild(this.vidAttnLabel);
@@ -3576,6 +3518,7 @@ class TimelineEditor {
     this.strengthRow.appendChild(this.durationLabel);
     this.strengthRow.appendChild(this.durationValue);
     this.strengthRow.appendChild(this.cropCutBtn);
+    this.strengthRow.appendChild(this.manualOutputRangeBtn);
 
 
 
@@ -3867,35 +3810,25 @@ class TimelineEditor {
   }
 
   syncWidgetsAndUI() {
-    console.log("[LTXDirector debug] syncWidgetsAndUI() called.");
-    console.log(`  - mainTrackEnabled: ${this.mainTrackEnabled}`);
-    console.log(`  - audioTrackEnabled: ${this.audioTrackEnabled}`);
-    console.log(`  - motionTrackEnabled: ${this.motionTrackEnabled}`);
-
     // 1. Sync the widgets with the loaded track enablement states
     const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
     if (customAudioWidget) {
       customAudioWidget.value = this.audioTrackEnabled;
-      console.log(`  - Set use_custom_audio widget value to ${this.audioTrackEnabled}`);
     }
     const customMotionWidget = this.node.widgets?.find(w => w.name === "use_custom_motion");
     if (customMotionWidget) {
       customMotionWidget.value = this.motionTrackEnabled;
-      console.log(`  - Set use_custom_motion widget value to ${this.motionTrackEnabled}`);
     }
 
     // 2. Sync the track icon buttons
     if (this.mainTrackLabel?._eyeBtn && this.updateTrackIcon) {
       this.updateTrackIcon(this.mainTrackLabel._eyeBtn, "main", this.mainTrackEnabled);
-      console.log("  - Updated main track eye icon");
     }
     if (this.audioTrackLabel?._eyeBtn && this.updateTrackIcon) {
       this.updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", this.audioTrackEnabled);
-      console.log("  - Updated audio track eye icon");
     }
     if (this.motionTrackLabel?._eyeBtn && this.updateTrackIcon) {
       this.updateTrackIcon(this.motionTrackLabel._eyeBtn, "motion", this.motionTrackEnabled);
-      console.log("  - Updated motion track eye icon");
     }
 
     // 3. Sync the inpaint button disabled/opacity state
@@ -3903,13 +3836,11 @@ class TimelineEditor {
     if (inpaintToggleBtn) {
       inpaintToggleBtn.disabled = !this.audioTrackEnabled;
       inpaintToggleBtn.style.opacity = this.audioTrackEnabled ? "1.0" : "0.3";
-      console.log(`  - Updated inpaint toggle button disabled: ${inpaintToggleBtn.disabled}`);
     }
 
     if (this.updateInpaintToggleStyle) {
       const inpaintWidget = this.node.widgets?.find(w => w.name === "inpaint_audio");
       if (inpaintWidget) {
-        console.log(`  - calling updateInpaintToggleStyle with ${inpaintWidget.value}`);
         this.updateInpaintToggleStyle(inpaintWidget.value);
       }
     }
@@ -3919,7 +3850,6 @@ class TimelineEditor {
     if (overrideAudioToggleBtn) {
       overrideAudioToggleBtn.disabled = !this.motionTrackEnabled;
       overrideAudioToggleBtn.style.opacity = this.motionTrackEnabled ? "1.0" : "0.3";
-      console.log(`  - Updated override audio toggle button disabled: ${overrideAudioToggleBtn.disabled}`);
     }
 
     if (this.updateOverrideAudioToggleStyle) {
@@ -3927,7 +3857,6 @@ class TimelineEditor {
       if (overrideWidget) {
         this.node.properties.overrideAudio = !!overrideWidget.value;
         this.timeline.overrideAudio = !!overrideWidget.value;
-        console.log(`  - calling updateOverrideAudioToggleStyle with ${overrideWidget.value}`);
         this.updateOverrideAudioToggleStyle(overrideWidget.value);
       }
     }
@@ -5292,6 +5221,86 @@ class TimelineEditor {
     this.splitSegmentAtPlayhead(seg, this.selectionType);
   }
 
+  updateManualOutputRangeToggle() {
+    if (!this.manualOutputRangeBtn) return;
+    const isOn = this.manualOutputRange === true;
+    this.manualOutputRangeBtn.textContent = `Manual Range: ${isOn ? "ON" : "OFF"}`;
+    this.manualOutputRangeBtn.classList.toggle("toggle-on", isOn);
+    this.manualOutputRangeBtn.title = isOn
+      ? "Manual output range is ON: timeline media will not auto-change start/end/duration"
+      : "Manual output range is OFF: timeline media can auto-match output duration";
+  }
+
+  setManualOutputRange(enabled, commit = true) {
+    this.manualOutputRange = enabled === true;
+    this.timeline.manualOutputRange = this.manualOutputRange;
+    this.updateManualOutputRangeToggle();
+    if (commit) {
+      if (!this.manualOutputRange) this.syncDurationToTimelineSegments();
+      this.commitChanges();
+      this.render();
+    }
+  }
+
+  getSelectedTimelineSegments() {
+    const ids = new Set(this.selectedSegmentIds || []);
+    if (ids.size === 0) return [];
+    return [
+      ...(this.timeline.segments || []),
+      ...(this.timeline.motionSegments || []),
+      ...(this.timeline.audioSegments || []),
+    ].filter(s => ids.has(s.id));
+  }
+
+  getRangeSourceSegments(seg) {
+    if (seg && this.isMultiSelectActive() && this.selectedSegmentIds.includes(seg.id)) {
+      return this.getSelectedTimelineSegments();
+    }
+    return seg ? [seg] : [];
+  }
+
+  setOutputRangeFrames(start, end) {
+    start = Math.max(0, Math.round(Number(start) || 0));
+    end = Math.max(start + 1, Math.round(Number(end) || start + 1));
+    const duration = end - start;
+    const fps = this.getFrameRate();
+
+    if (this.startFramesWidget) this.startFramesWidget.value = start;
+    if (this.startSecondsWidget) this.startSecondsWidget.value = parseFloat((start / fps).toFixed(3));
+    if (this.endFramesWidget) this.endFramesWidget.value = end;
+    if (this.endSecondsWidget) this.endSecondsWidget.value = parseFloat((end / fps).toFixed(3));
+    if (this.durationFramesWidget) this.durationFramesWidget.value = duration;
+    if (this.durationSecondsWidget) this.durationSecondsWidget.value = parseFloat((duration / fps).toFixed(3));
+
+    this.timeline.normalStartFrame = start;
+    this.timeline.normalDurationFrames = duration;
+    this.setManualOutputRange(true, false);
+    this.commitChanges();
+    this.render();
+  }
+
+  setStartAtPlayhead() {
+    const currentEnd = this.endFramesWidget?.value ?? (this.getStartFrames() + this.getDurationFrames());
+    this.setOutputRangeFrames(this.currentFrame, currentEnd);
+  }
+
+  setEndAtPlayhead() {
+    this.setOutputRangeFrames(this.getStartFrames(), this.currentFrame);
+  }
+
+  setOutputRangeFromSegments(segments) {
+    const range = calculateSegmentRange(segments);
+    if (!range) return;
+    this.setOutputRangeFrames(range.start, range.end);
+  }
+
+  setDurationToSegmentsEnd(segments) {
+    const range = calculateSegmentRange(segments);
+    if (!range) return;
+    const start = this.getStartFrames();
+    this.setOutputRangeFrames(start, Math.max(start + 1, range.end));
+  }
+
   setSelectedDurationSeconds(value) {
     if (this.retakeMode) {
       const seconds = parseFloat(value);
@@ -5313,13 +5322,6 @@ class TimelineEditor {
       return;
     }
 
-    const oldEnd = seg.start + seg.length;
-    seg.length = Math.max(MIN_SEGMENT_LENGTH, Math.round(seconds * this.getFrameRate()));
-    if (seg.videoDurationFrames || seg.audioDurationFrames) {
-      seg.length = clampSegmentLengthToSource(seg);
-    }
-    const newEnd = seg.start + seg.length;
-
     const segId = seg.id;
     const siblingId = String(seg.id || "").endsWith("_v")
       ? String(seg.id).slice(0, -2) + "_a"
@@ -5331,10 +5333,26 @@ class TimelineEditor {
     if (siblingId) {
       siblingArray = siblingId.endsWith("_a") ? this.timeline.audioSegments : this.timeline.segments;
       sibling = siblingArray?.find(s => s.id === siblingId);
-      if (sibling) sibling.length = seg.length;
     }
 
-    pullSegmentsAfterShrink(arr, oldEnd, newEnd, segId);
+    const oldEnd = seg.start + seg.length;
+    let newLength = Math.max(MIN_SEGMENT_LENGTH, Math.round(seconds * this.getFrameRate()));
+    if (seg.videoDurationFrames || seg.audioDurationFrames) {
+      newLength = clampSegmentLengthToSource({ ...seg, length: newLength });
+    }
+    const keepAudioTail = this.selectionType === "audio" && !sibling && newLength < seg.length;
+    let tailSeg = null;
+    if (keepAudioTail) {
+      const tailId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+      tailSeg = splitSegmentTailAfterShrink(seg, newLength, tailId);
+      if (tailSeg) arr.push(tailSeg);
+    } else {
+      seg.length = newLength;
+    }
+    const newEnd = seg.start + seg.length;
+    if (sibling) sibling.length = seg.length;
+
+    if (!tailSeg) pullSegmentsAfterShrink(arr, oldEnd, newEnd, segId);
     pushOverlappingSegmentsForward(arr, segId);
     if (sibling && siblingArray) {
       pullSegmentsAfterShrink(siblingArray, oldEnd, newEnd, sibling.id);
@@ -5342,7 +5360,7 @@ class TimelineEditor {
     }
     this.selectedIndex = arr.findIndex(s => s.id === segId);
 
-    this.syncDurationToTimelineSegments();
+    this.syncDurationToTimelineSegmentsIfAuto();
     this.updateUIFromSelection();
     this.commitChanges();
     this.render();
@@ -5403,7 +5421,7 @@ class TimelineEditor {
     arr.sort((a, b) => a.start - b.start);
     this.selectionType = "image";
     this.selectedIndex = arr.findIndex(s => s.id === seg.id);
-    this.syncDurationToTimelineSegments();
+    this.syncDurationToTimelineSegmentsIfAuto();
     this.commitChanges();
     this.updateUIFromSelection();
     this.render();
@@ -5623,8 +5641,6 @@ class TimelineEditor {
 
       if (this.audioInfoArea) this.audioInfoArea.style.display = "none";
       if (this.motionInfoArea) this.motionInfoArea.style.display = "none";
-      if (this.transitionLabel) this.transitionLabel.style.display = "none";
-      if (this.transitionValue) this.transitionValue.style.display = "none";
       if (this.durationValue) {
         this.durationValue.value = "";
         this.durationValue.disabled = true;
@@ -5691,8 +5707,6 @@ class TimelineEditor {
       this.cropCutBtn.disabled = false;
       this.cropCutBtn.style.opacity = "";
     }
-    if (this.transitionLabel) this.transitionLabel.style.display = "none";
-    if (this.transitionValue) this.transitionValue.style.display = "none";
 
     if (this.retakeMode) {
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
@@ -5713,8 +5727,6 @@ class TimelineEditor {
       this.vidStrValue.style.display = "none";
       this.vidAttnLabel.style.display = "none";
       this.vidAttnValue.style.display = "none";
-      this.transitionLabel.style.display = "none";
-      this.transitionValue.style.display = "none";
 
       this.audioInfoArea.style.display = "none";
       this.motionInfoArea.style.display = "none";
@@ -5740,8 +5752,6 @@ class TimelineEditor {
       this.vidStrValue.style.display = "none";
       this.vidAttnLabel.style.display = "none";
       this.vidAttnValue.style.display = "none";
-      this.transitionLabel.style.display = "none";
-      this.transitionValue.style.display = "none";
       this.audioInfoArea.style.display = "block";
       this.motionInfoArea.style.display = "none";
       this.audioInfoArea.innerHTML = `
@@ -5770,8 +5780,6 @@ class TimelineEditor {
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "none";
       this.strengthValue.style.display = "none";
-      this.transitionLabel.style.display = "none";
-      this.transitionValue.style.display = "none";
       this.vidStrLabel.style.display = "inline";
       this.vidStrValue.style.display = "inline-block";
       this.vidAttnLabel.style.display = "inline";
@@ -5803,9 +5811,6 @@ class TimelineEditor {
       this.vidStrValue.style.display = "none";
       this.vidAttnLabel.style.display = "none";
       this.vidAttnValue.style.display = "none";
-      this.transitionLabel.style.display = "inline";
-      this.transitionValue.style.display = "inline-block";
-
       if (seg) {
         if (this.selectionType !== "motion") {
           this.promptInput.value = seg.prompt || "";
@@ -5819,8 +5824,6 @@ class TimelineEditor {
         this.strengthValue.value = strength.toFixed(2);
         this.strengthValue.disabled = !isImage;
         this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
-        this.transitionValue.value = (seg.transitionSmoothness ?? 0.0).toFixed(2);
-        this.transitionValue.disabled = false;
         if (this.durationValue) this.durationValue.value = (seg.length / this.getFrameRate()).toFixed(2);
       } else {
         this.promptInput.value = "";
@@ -5830,8 +5833,6 @@ class TimelineEditor {
         this.strengthValue.value = "1.00";
         this.strengthValue.disabled = true;
         this.strengthValue.style.opacity = "0.35";
-        this.transitionValue.value = "0.00";
-        this.transitionValue.disabled = true;
         if (this.durationValue) {
           this.durationValue.value = "";
           this.durationValue.disabled = true;
@@ -9020,7 +9021,8 @@ class TimelineEditor {
       this.timeline.motionSegments = this.timeline.motionSegments.filter((seg, index, self) => index === self.findIndex((s) => s.id === seg.id));
     }
 
-    if (!this.retakeMode && [
+    const shouldSyncDuration = shouldAutoSyncDuration(this.manualOutputRange);
+    if (shouldSyncDuration && !this.retakeMode && [
       ...(this.timeline.segments || []),
       ...(this.timeline.audioSegments || []),
       ...(this.timeline.motionSegments || []),
@@ -9031,7 +9033,6 @@ class TimelineEditor {
     let sortedSegments = [...this.timeline.segments].sort((a, b) => a.start - b.start);
     let contiguousLengths = [];
     let contiguousPrompts = [];
-    let contiguousTransitions = [];
     let imgStrengths = [];
 
     const startFrames = this.getStartFrames();
@@ -9059,7 +9060,6 @@ class TimelineEditor {
       if (pBeforeLen > 0) {
         contiguousLengths.push(pBeforeLen);
         contiguousPrompts.push(globalPrompt || "video");
-        contiguousTransitions.push("0.00");
         imgStrengths.push("0.00");
       }
 
@@ -9070,7 +9070,6 @@ class TimelineEditor {
       if (rLen > 0) {
         contiguousLengths.push(rLen);
         contiguousPrompts.push(retakePrompt || "video");
-        contiguousTransitions.push("0.00");
         imgStrengths.push(retakeStrength.toFixed(2));
       }
 
@@ -9081,7 +9080,6 @@ class TimelineEditor {
       if (pAfterLen > 0) {
         contiguousLengths.push(pAfterLen);
         contiguousPrompts.push(globalPrompt || "video");
-        contiguousTransitions.push("0.00");
         imgStrengths.push("0.00");
       }
     } else {
@@ -9111,7 +9109,6 @@ class TimelineEditor {
 
         contiguousLengths.push(clippedLength + pendingGap);
         contiguousPrompts.push(seg.prompt || "");
-        contiguousTransitions.push((seg.transitionSmoothness ?? 0.0).toFixed(2));
         pendingGap = 0;
         currentCursor = Math.max(currentCursor, seg.start + seg.length);
       }
@@ -9129,6 +9126,7 @@ class TimelineEditor {
       propHeight: this.propHeight,
       globalPropHeight: this.globalPropHeight,
       showFilenames: !!this.node.properties.showFilenames,
+      manualOutputRange: this.manualOutputRange === true,
       overrideAudio: this.getOverrideAudioEnabled(),
       inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
       global_prompt: this.retakeMode ? (this.timeline.global_prompt || "") : (this.globalPromptInput ? this.globalPromptInput.value : ""),
@@ -9161,7 +9159,6 @@ class TimelineEditor {
     };
 
     const jsonStr = JSON.stringify(toSave);
-    console.log("[LTXDirector debug] commitChanges: saving timelineDataWidget value:", jsonStr);
 
     const updateWidgetValue = (w, val) => {
       if (!w) return;
@@ -9223,10 +9220,6 @@ class TimelineEditor {
     if (this.segmentLengthsWidget) {
       updateWidgetValue(this.segmentLengthsWidget, contiguousLengths.join(","));
     }
-    if (this.transitionSmoothnessWidget) {
-      updateWidgetValue(this.transitionSmoothnessWidget, contiguousTransitions.join(","));
-    }
-
     if (this.guideStrengthWidget) {
       let val = "";
       if (this.retakeMode) {
@@ -9413,6 +9406,17 @@ class TimelineEditor {
     fi.click();
   }
 
+  fitContextMenuToViewport(menu) {
+    const pad = 8;
+    const rect = menu.getBoundingClientRect();
+    const maxLeft = Math.max(pad, window.innerWidth - rect.width - pad);
+    const maxTop = Math.max(pad, window.innerHeight - rect.height - pad);
+    const left = Math.min(Math.max(pad, rect.left), maxLeft);
+    const top = Math.min(Math.max(pad, rect.top), maxTop);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
   // --- Context Menu ---
   onContextMenu(e) {
     e.preventDefault();
@@ -9437,6 +9441,11 @@ class TimelineEditor {
     const logicalWidth = this.canvas.offsetWidth || 1;
     const totalFrames = this.getVisualDurationFrames();
     const cursor = mouseX * (totalFrames / logicalWidth);
+
+    if (mouseY <= RULER_HEIGHT) {
+      this.showPlayheadContextMenu(e.clientX, e.clientY);
+      return;
+    }
 
     let clickedSeg = null;
     let trackType = "";
@@ -9471,6 +9480,41 @@ class TimelineEditor {
 
       this.showGapContextMenu(e.clientX, e.clientY, gap);
     }
+  }
+
+  showPlayheadContextMenu(clientX, clientY) {
+    this.dismissContextMenu();
+    const menu = document.createElement("div");
+    menu.className = "pr-gap-menu";
+    menu.style.left = `${clientX + 6}px`;
+    menu.style.top = `${clientY - 10}px`;
+
+    const startBtn = document.createElement("button");
+    startBtn.className = "pr-gap-menu-btn";
+    startBtn.innerHTML = `Set Start at Playhead`;
+    startBtn.onclick = () => {
+      this.setStartAtPlayhead();
+      this.dismissContextMenu();
+    };
+    menu.appendChild(startBtn);
+
+    const endBtn = document.createElement("button");
+    endBtn.className = "pr-gap-menu-btn";
+    endBtn.innerHTML = `Set End at Playhead`;
+    endBtn.onclick = () => {
+      this.setEndAtPlayhead();
+      this.dismissContextMenu();
+    };
+    menu.appendChild(endBtn);
+
+    document.body.appendChild(menu);
+    this.fitContextMenuToViewport(menu);
+    this._contextMenu = menu;
+    setTimeout(() => {
+      this._contextMenuDismisser = (ev) => { if (!menu.contains(ev.target)) this.dismissContextMenu(); };
+      document.addEventListener("pointerdown", this._contextMenuDismisser, true);
+      document.addEventListener("wheel", this._contextMenuDismisser, true);
+    }, 0);
   }
 
   _deleteRetakeVideo() {
@@ -9511,6 +9555,7 @@ class TimelineEditor {
     menu.appendChild(deleteBtn);
 
     document.body.appendChild(menu);
+    this.fitContextMenuToViewport(menu);
     this._contextMenu = menu;
     setTimeout(() => {
       this._contextMenuDismisser = (ev) => { if (!menu.contains(ev.target)) this.dismissContextMenu(); };
@@ -9534,12 +9579,14 @@ class TimelineEditor {
           }
           if (!hasImg) {
             btn.disabled = true;
+            btn.style.display = "none";
             btn.style.opacity = "0.4";
             btn.style.cursor = "not-allowed";
             btn.title = "No image found in clipboard";
           }
         } else if (status.state === "denied") {
           btn.disabled = true;
+          btn.style.display = "none";
           btn.style.opacity = "0.4";
           btn.style.cursor = "not-allowed";
           btn.title = "Clipboard permission denied";
@@ -9558,12 +9605,14 @@ class TimelineEditor {
           const text = await navigator.clipboard.readText();
           if (!text || text.trim() === "") {
             btn.disabled = true;
+            btn.style.display = "none";
             btn.style.opacity = "0.4";
             btn.style.cursor = "not-allowed";
             btn.title = "No text found in clipboard";
           }
         } else if (status.state === "denied") {
           btn.disabled = true;
+          btn.style.display = "none";
           btn.style.opacity = "0.4";
           btn.style.cursor = "not-allowed";
           btn.title = "Clipboard permission denied";
@@ -9594,7 +9643,7 @@ class TimelineEditor {
     // ==========================================
     const copySegBtn = document.createElement("button");
     copySegBtn.className = "pr-gap-menu-btn";
-    copySegBtn.innerHTML = `Copy Segment`;
+    copySegBtn.innerHTML = `Copy Timeline Segment`;
     copySegBtn.onclick = () => {
       this._copiedSegment = { ...seg, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) };
       this._copiedSegmentTrack = trackType;
@@ -9626,12 +9675,7 @@ class TimelineEditor {
     const pasteSegBtn = document.createElement("button");
     pasteSegBtn.className = "pr-gap-menu-btn";
     pasteSegBtn.innerHTML = `Paste Segment`;
-    if (!canPaste) {
-      pasteSegBtn.disabled = true;
-      pasteSegBtn.style.opacity = "0.4";
-      pasteSegBtn.style.cursor = "not-allowed";
-      pasteSegBtn.title = "No matching segment copied to clipboard";
-    } else {
+    if (canPaste) {
       pasteSegBtn.onclick = () => {
         const startFrame = Math.round(this.currentFrame);
         this.pasteSegmentAtFrame(copiedSegData, this.getCanonicalTrack(copiedTrack), copiedSibData, startFrame);
@@ -9644,12 +9688,7 @@ class TimelineEditor {
     const pasteReplaceBtn = document.createElement("button");
     pasteReplaceBtn.className = "pr-gap-menu-btn";
     pasteReplaceBtn.innerHTML = `Replace Segment`;
-    if (!canReplace) {
-      pasteReplaceBtn.disabled = true;
-      pasteReplaceBtn.style.opacity = "0.4";
-      pasteReplaceBtn.style.cursor = "not-allowed";
-      pasteReplaceBtn.title = "No matching segment copied to clipboard";
-    } else {
+    if (canReplace) {
       pasteReplaceBtn.onclick = () => {
         const newSeg = {
           ...copiedSegData,
@@ -9717,7 +9756,7 @@ class TimelineEditor {
     if (isImage) {
       copyImgBtn = document.createElement("button");
       copyImgBtn.className = "pr-gap-menu-btn";
-      copyImgBtn.innerHTML = `Copy Image`;
+      copyImgBtn.innerHTML = `Copy Image to Clipboard`;
       copyImgBtn.onclick = async () => {
         try {
           const img = new Image();
@@ -9907,6 +9946,8 @@ class TimelineEditor {
 
     let fitToAudioBtn = null;
     let fitToVisualBtn = null;
+    let setOutputRangeBtn = null;
+    let setDurationEndBtn = null;
     const canonicalTrack = this.getCanonicalTrack(trackType);
     if (canonicalTrack === "image") {
       const segLabel = seg.type === "text" ? "Text" : "Image";
@@ -9930,6 +9971,25 @@ class TimelineEditor {
           this.dismissContextMenu();
         };
       }
+    }
+    const rangeSourceSegments = this.getRangeSourceSegments(seg);
+    if (rangeSourceSegments.length > 0) {
+      const rangeLabel = rangeSourceSegments.length > 1 ? "Selection" : "Segment";
+      setOutputRangeBtn = document.createElement("button");
+      setOutputRangeBtn.className = "pr-gap-menu-btn";
+      setOutputRangeBtn.innerHTML = `Set Output Range from ${rangeLabel}`;
+      setOutputRangeBtn.onclick = () => {
+        this.setOutputRangeFromSegments(rangeSourceSegments);
+        this.dismissContextMenu();
+      };
+
+      setDurationEndBtn = document.createElement("button");
+      setDurationEndBtn.className = "pr-gap-menu-btn";
+      setDurationEndBtn.innerHTML = `Set Duration to ${rangeLabel} End`;
+      setDurationEndBtn.onclick = () => {
+        this.setDurationToSegmentsEnd(rangeSourceSegments);
+        this.dismissContextMenu();
+      };
     }
 
     const markSelectionBtn = document.createElement("button");
@@ -9961,8 +10021,8 @@ class TimelineEditor {
 
     // Group 1: Segment Options (Always present)
     menu.appendChild(copySegBtn);
-    menu.appendChild(pasteSegBtn);
-    menu.appendChild(pasteReplaceBtn);
+    if (canPaste) menu.appendChild(pasteSegBtn);
+    if (canReplace) menu.appendChild(pasteReplaceBtn);
     menu.appendChild(makeDivider());
 
     // Group 2: Prompt Options (Only if not audio)
@@ -9972,13 +10032,26 @@ class TimelineEditor {
       menu.appendChild(makeDivider());
     }
 
-    // Group 3: Image Options (Only if isImage)
+    if (fitToAudioBtn || fitToVisualBtn) {
+      if (fitToAudioBtn) menu.appendChild(fitToAudioBtn);
+      if (fitToVisualBtn) menu.appendChild(fitToVisualBtn);
+      menu.appendChild(makeDivider());
+    }
+    if (setOutputRangeBtn || setDurationEndBtn) {
+      if (setOutputRangeBtn) menu.appendChild(setOutputRangeBtn);
+      if (setDurationEndBtn) menu.appendChild(setDurationEndBtn);
+      menu.appendChild(makeDivider());
+    }
+    menu.appendChild(markSelectionBtn);
+    menu.appendChild(makeDivider());
+
+    // Group 3: Image utility options (Only if isImage)
     if (isImage) {
+      menu.appendChild(replaceWithFileBtn);
       menu.appendChild(copyImgBtn);
       menu.appendChild(saveImgBtn);
       menu.appendChild(openImgBtn);
       menu.appendChild(replaceImgBtn);
-      menu.appendChild(replaceWithFileBtn);
       menu.appendChild(makeDivider());
     }
 
@@ -9988,23 +10061,17 @@ class TimelineEditor {
       menu.appendChild(makeDivider());
     }
 
-    // Group 5: Unlink Media & Mark Selection
+    // Group 5: Unlink Media
     if (unlinkBtn) {
       menu.appendChild(unlinkBtn);
       menu.appendChild(makeDivider());
     }
-    if (fitToAudioBtn || fitToVisualBtn) {
-      if (fitToAudioBtn) menu.appendChild(fitToAudioBtn);
-      if (fitToVisualBtn) menu.appendChild(fitToVisualBtn);
-      menu.appendChild(makeDivider());
-    }
-    menu.appendChild(markSelectionBtn);
-    menu.appendChild(makeDivider());
 
     // Group 6: Delete Option
     menu.appendChild(delBtn);
 
     document.body.appendChild(menu);
+    this.fitContextMenuToViewport(menu);
     this._contextMenu = menu;
 
     setTimeout(() => {
@@ -10031,19 +10098,14 @@ class TimelineEditor {
     const pasteBtn = document.createElement("button");
     pasteBtn.className = "pr-gap-menu-btn";
     pasteBtn.innerHTML = `Paste Segment`;
-    if (!canPaste) {
-      pasteBtn.disabled = true;
-      pasteBtn.style.opacity = "0.4";
-      pasteBtn.style.cursor = "not-allowed";
-      pasteBtn.title = "No matching segment copied to clipboard";
-    } else {
+    if (canPaste) {
       pasteBtn.onclick = () => {
         const startFrame = Math.round(gap.clickedFrame !== undefined ? gap.clickedFrame : gap.frameStart);
         this.pasteSegmentAtFrame(copiedSegData, this.getCanonicalTrack(copiedTrack), copiedSibData, startFrame);
         this.dismissContextMenu();
       };
     }
-    menu.appendChild(pasteBtn);
+    if (canPaste) menu.appendChild(pasteBtn);
 
     if (currentTrack === "image") {
       const textBtn = document.createElement("button");
@@ -10133,6 +10195,7 @@ class TimelineEditor {
     }
 
     document.body.appendChild(menu);
+    this.fitContextMenuToViewport(menu);
     this._contextMenu = menu;
     setTimeout(() => {
       this._contextMenuDismisser = (ev) => { if (!menu.contains(ev.target)) this.dismissContextMenu(); };
@@ -10255,21 +10318,17 @@ class TimelineEditor {
     const pasteBtn = document.createElement("button");
     pasteBtn.className = "pr-gap-menu-btn";
     pasteBtn.innerHTML = `Paste Segment`;
-    if (!canPaste) {
-      pasteBtn.disabled = true;
-      pasteBtn.style.opacity = "0.4";
-      pasteBtn.style.cursor = "not-allowed";
-      pasteBtn.title = "No matching segment copied to clipboard";
-    } else {
+    if (canPaste) {
       pasteBtn.onclick = () => {
         const startFrame = Math.round(gap.frameStart);
         this.pasteSegmentAtFrame(copiedSegData, this.getCanonicalTrack(copiedTrack), copiedSibData, startFrame);
         this.dismissGapMenu();
       };
     }
-    menu.appendChild(pasteBtn);
+    if (canPaste) menu.appendChild(pasteBtn);
 
     document.body.appendChild(menu);
+    this.fitContextMenuToViewport(menu);
     this._gapMenu = menu;
     setTimeout(() => {
       this._gapMenuDismisser = (ev) => { if (!menu.contains(ev.target)) this.dismissGapMenu(); };
@@ -10488,6 +10547,8 @@ class TimelineEditor {
       this.mainTrackEnabled = this.timeline.mainTrackEnabled !== false;
       this.audioTrackEnabled = this.timeline.audioTrackEnabled !== false;
       this.motionTrackEnabled = this.timeline.motionTrackEnabled !== false;
+      this.manualOutputRange = this.timeline.manualOutputRange === true;
+      this.updateManualOutputRangeToggle();
       if (this.timeline.showFilenames !== undefined) {
         this.node.properties.showFilenames = this.timeline.showFilenames;
       }
@@ -10592,7 +10653,8 @@ class TimelineEditor {
         audioTrackEnabled: this.audioTrackEnabled,
         motionTrackEnabled: this.motionTrackEnabled,
         showFilenames: !!this.node.properties.showFilenames,
-      overrideAudio: this.getOverrideAudioEnabled(),
+        manualOutputRange: this.manualOutputRange === true,
+        overrideAudio: this.getOverrideAudioEnabled(),
         inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
         propHeight: this.propHeight,
         globalPropHeight: this.globalPropHeight,
@@ -11706,8 +11768,6 @@ app.registerExtension({
         }
         markYusuNode(this);
 
-        console.log("[LTXDirector debug] onConfigure called. info.widgets_values:", info.widgets_values ? JSON.stringify(info.widgets_values) : "undefined");
-
         // Helper to set widget value, sync DOM element, and trigger callbacks safely
         const setWidgetValue = (w, val) => {
           if (!w) return;
@@ -11730,7 +11790,6 @@ app.registerExtension({
 
         // 2. Check if we have serialized properties. If so, restore widgets from properties!
         if (info.properties && info.properties.has_serialized_properties) {
-          console.log("[LTXDirector debug] Restoring widgets from properties");
           if (this.widgets) {
             for (const w of this.widgets) {
               if (w.name && this.properties[w.name] !== undefined) {
@@ -11740,7 +11799,6 @@ app.registerExtension({
           }
         } else if (info.widgets_values) {
           // Fallback to name-based schema mapping for older workflows
-          console.log("[LTXDirector debug] Restoring widgets via fallback name-based schema mapping");
           const SCHEMA_19 = [
             "start_frame", "end_frame", "duration_frames",
             "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
@@ -11841,16 +11899,15 @@ app.registerExtension({
 
         setTimeout(() => {
           if (this._timelineEditor) {
-            console.log("[LTXDirector debug] setTimeout sync block called.");
-            console.log("[LTXDirector debug] setTimeout: timelineDataWidget value:", this._timelineEditor.timelineDataWidget?.value);
             const tl = parseInitial(this._timelineEditor.timelineDataWidget?.value);
-            console.log("[LTXDirector debug] setTimeout: parsed timeline:", JSON.stringify(tl));
             this._timelineEditor.timeline = tl;
 
             // Sync editor states from the parsed timeline object (the absolute source of truth)
             this._timelineEditor.mainTrackEnabled = tl.mainTrackEnabled !== false;
             this._timelineEditor.audioTrackEnabled = tl.audioTrackEnabled !== false;
             this._timelineEditor.motionTrackEnabled = tl.motionTrackEnabled !== false;
+            this._timelineEditor.manualOutputRange = tl.manualOutputRange === true;
+            this._timelineEditor.updateManualOutputRangeToggle();
             this._timelineEditor.retakeMode = tl.retakeMode === true;
             this._timelineEditor._audioTrackWasEnabledBeforeOverride = !!this.properties.audioTrackWasEnabledBeforeOverride;
 

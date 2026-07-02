@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   calculatePlaybackDurationFrames,
+  calculateSegmentRange,
   calculateTimelineDurationFrames,
+  shouldAutoSyncDuration,
+  splitSegmentTailAfterShrink,
   pullSegmentsAfterShrink,
   pushOverlappingSegmentsForward,
 } from "../js/timeline_duration.js";
@@ -87,4 +90,52 @@ test("shrinking preserves existing gap after the old end", () => {
 
 test("playback duration ignores visual padding", () => {
   assert.equal(calculatePlaybackDurationFrames(360, 468), 360);
+});
+
+test("selection range uses timeline segment length, not source media length", () => {
+  const range = calculateSegmentRange([
+    { id: "image", start: 24, length: 48 },
+    { id: "audio", start: 96, length: 24, trimStart: 120, audioDurationFrames: 600 },
+  ]);
+
+  assert.deepEqual(range, { start: 24, end: 120, duration: 96 });
+});
+
+test("single segment can define an output range", () => {
+  assert.deepEqual(calculateSegmentRange([{ id: "audio", start: 72, length: 36 }]), {
+    start: 72,
+    end: 108,
+    duration: 36,
+  });
+});
+
+test("manual output range disables automatic duration sync", () => {
+  assert.equal(shouldAutoSyncDuration(false), true);
+  assert.equal(shouldAutoSyncDuration(undefined), true);
+  assert.equal(shouldAutoSyncDuration(true), false);
+});
+
+test("shrinking an audio segment can keep the removed tail on the timeline", () => {
+  const audio = { id: "voice", start: 48, length: 96, trimStart: 24, audioDurationFrames: 240, audioFile: "voice.wav" };
+
+  const tail = splitSegmentTailAfterShrink(audio, 36, "tail");
+
+  assert.deepEqual(
+    {
+      leftLength: audio.length,
+      tailId: tail.id,
+      tailStart: tail.start,
+      tailLength: tail.length,
+      tailTrimStart: tail.trimStart,
+      tailAudioFile: tail.audioFile,
+    },
+    {
+      leftLength: 36,
+      tailId: "tail",
+      tailStart: 84,
+      tailLength: 60,
+      tailTrimStart: 60,
+      tailAudioFile: "voice.wav",
+    }
+  );
 });

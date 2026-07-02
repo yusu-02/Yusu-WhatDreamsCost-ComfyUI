@@ -834,17 +834,6 @@ def _encode_relay(model, clip, latent, global_prompt, local_prompts, segment_len
         pixel_lengths = [int(float(x.strip())) for x in segment_lengths.split(",") if x.strip()]
         parsed_lengths = _convert_to_latent_lengths(pixel_lengths, temporal_stride, latent_frames)
 
-    transition_values = []
-    if transition_smoothness and transition_smoothness.strip():
-        for value in transition_smoothness.split(","):
-            value = value.strip()
-            if not value:
-                continue
-            try:
-                transition_values.append(float(value))
-            except ValueError:
-                transition_values.append(0.0)
-
     raw_tokenizer = get_raw_tokenizer(clip)
     full_prompt, token_ranges = map_token_indices(raw_tokenizer, global_prompt, locals_list)
 
@@ -861,7 +850,7 @@ def _encode_relay(model, clip, latent, global_prompt, local_prompts, segment_len
         latent_frames, tokens_per_frame, effective_lengths,
     )
 
-    q_token_idx = build_segments(token_ranges, effective_lengths, epsilon, {"transition_smoothness": transition_values})
+    q_token_idx = build_segments(token_ranges, effective_lengths, epsilon)
     mask_fn = create_mask_fn(q_token_idx, tokens_per_frame, latent_frames)
 
     patched = model.clone()
