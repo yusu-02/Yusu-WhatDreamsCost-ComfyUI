@@ -13,7 +13,7 @@ const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
 const MAX_THUMBNAIL_DIM = 512; // Increased to maintain quality for taller images
 
-const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "transition_smoothness", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "use_custom_motion", "override_audio"];
+const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "transition_smoothness", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "use_custom_motion", "override_audio", "use_ic_video_size"];
 const SETTINGS_WIDGETS_VISIBLE_PROPERTY = "yusuSettingsWidgetsVisible";
 const GLOBAL_PROMPT_VISIBLE_PROPERTY = "yusuGlobalPromptVisible";
 
@@ -673,6 +673,7 @@ function parseInitial(jsonStr) {
     globalPropHeight: 60,
     showFilenames: true,
     manualOutputRange: false,
+    useICVideoSize: false,
     overrideAudio: false,
     inpaint_audio: true,
     retakeMode: false,
@@ -697,6 +698,7 @@ function parseInitial(jsonStr) {
       if (p.globalPropHeight !== undefined) parsed.globalPropHeight = p.globalPropHeight;
       if (p.showFilenames !== undefined) parsed.showFilenames = p.showFilenames;
       if (p.manualOutputRange !== undefined) parsed.manualOutputRange = !!p.manualOutputRange;
+      if (p.useICVideoSize !== undefined) parsed.useICVideoSize = !!p.useICVideoSize;
       if (p.overrideAudio !== undefined) {
         parsed.overrideAudio = p.overrideAudio;
         parsed._hasOverrideAudio = true;
@@ -865,6 +867,7 @@ class TimelineEditor {
     this.audioTrackEnabled = this.timeline.audioTrackEnabled !== false;
     this.motionTrackEnabled = this.timeline.motionTrackEnabled !== false;
     this.manualOutputRange = this.timeline.manualOutputRange === true;
+    this.useICVideoSize = this.timeline.useICVideoSize === true;
 
     // Sync the properties dictionary too so they match
     this.node.properties.mainTrackEnabled = this.mainTrackEnabled;
@@ -3334,6 +3337,20 @@ class TimelineEditor {
     });
     this.updateManualOutputRangeToggle();
 
+    this.icVideoSizeBtn = document.createElement("button");
+    this.icVideoSizeBtn.className = "pr-btn";
+    Object.assign(this.icVideoSizeBtn.style, {
+      padding: "4px 8px",
+      marginLeft: "6px",
+      fontSize: "10px",
+      height: "24px",
+      whiteSpace: "nowrap",
+    });
+    this.icVideoSizeBtn.addEventListener("click", () => {
+      this.setICVideoSize(!this.useICVideoSize);
+    });
+    this.updateICVideoSizeToggle();
+
     this.vidStrValue.addEventListener("change", (e) => {
       let val = parseFloat(e.target.value);
       if (isNaN(val)) val = 1.0;
@@ -3534,6 +3551,7 @@ class TimelineEditor {
     this.strengthRow.appendChild(this.durationValue);
     this.strengthRow.appendChild(this.cropCutBtn);
     this.strengthRow.appendChild(this.manualOutputRangeBtn);
+    this.strengthRow.appendChild(this.icVideoSizeBtn);
 
 
 
@@ -5255,6 +5273,26 @@ class TimelineEditor {
       this.commitChanges();
       this.render();
     }
+  }
+
+  updateICVideoSizeToggle() {
+    if (!this.icVideoSizeBtn) return;
+    const isOn = this.useICVideoSize === true;
+    this.icVideoSizeBtn.textContent = `IC Size: ${isOn ? "ON" : "OFF"}`;
+    this.icVideoSizeBtn.classList.toggle("toggle-on", isOn);
+    this.icVideoSizeBtn.title = isOn
+      ? "Output size follows the first IC-LoRA reference video"
+      : "Output size follows the director width/height settings";
+  }
+
+  setICVideoSize(enabled, commit = true) {
+    this.useICVideoSize = enabled === true;
+    this.timeline.useICVideoSize = this.useICVideoSize;
+    const widget = this.node.widgets?.find(w => w.name === "use_ic_video_size");
+    if (widget) widget.value = this.useICVideoSize;
+    if (this.node.properties) this.node.properties.use_ic_video_size = this.useICVideoSize;
+    this.updateICVideoSizeToggle();
+    if (commit) this.commitChanges();
   }
 
   getSelectedTimelineSegments() {
@@ -9142,6 +9180,7 @@ class TimelineEditor {
       globalPropHeight: this.globalPropHeight,
       showFilenames: !!this.node.properties.showFilenames,
       manualOutputRange: this.manualOutputRange === true,
+      useICVideoSize: this.useICVideoSize === true,
       overrideAudio: this.getOverrideAudioEnabled(),
       inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
       global_prompt: this.retakeMode ? (this.timeline.global_prompt || "") : (this.globalPromptInput ? this.globalPromptInput.value : ""),
@@ -9222,6 +9261,10 @@ class TimelineEditor {
     const overrideWidget = this.node.widgets?.find(w => w.name === "override_audio");
     if (overrideWidget) {
       updateWidgetValue(overrideWidget, !!this.node.properties.overrideAudio);
+    }
+    const icSizeWidget = this.node.widgets?.find(w => w.name === "use_ic_video_size");
+    if (icSizeWidget) {
+      updateWidgetValue(icSizeWidget, this.useICVideoSize === true);
     }
     const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
     if (customAudioWidget) {
@@ -10647,7 +10690,7 @@ class TimelineEditor {
 
   _getTimelineSavePayload() {
     const allSettings = {};
-    const skipWidgets = ["timeline_data", "local_prompts", "segment_lengths", "transition_smoothness", "guide_strength", "timeline_ui", "global_prompt"];
+    const skipWidgets = ["timeline_data", "local_prompts", "segment_lengths", "transition_smoothness", "guide_strength", "timeline_ui", "global_prompt", "use_ic_video_size"];
 
     for (const w of this.node.widgets || []) {
       if (!skipWidgets.includes(w.name) && w.value !== undefined) {
@@ -11605,6 +11648,7 @@ app.registerExtension({
           inpaint_audio: true,
           override_audio: false,
           overrideAudio: false,
+          use_ic_video_size: false,
           showFilenames: true,
           use_custom_audio: false,
           use_custom_motion: true,
@@ -11848,6 +11892,7 @@ app.registerExtension({
           const ALL_WIDGET_DEFAULTS = {
             inpaint_audio: true,
             override_audio: false,
+            use_ic_video_size: false,
             use_custom_audio: false,
             use_custom_motion: true,
             frame_rate: 24,
@@ -11923,6 +11968,10 @@ app.registerExtension({
             this._timelineEditor.motionTrackEnabled = tl.motionTrackEnabled !== false;
             this._timelineEditor.manualOutputRange = tl.manualOutputRange === true;
             this._timelineEditor.updateManualOutputRangeToggle();
+            this._timelineEditor.useICVideoSize = tl.useICVideoSize !== undefined
+              ? tl.useICVideoSize === true
+              : this.properties.use_ic_video_size === true;
+            this._timelineEditor.updateICVideoSizeToggle();
             this._timelineEditor.retakeMode = tl.retakeMode === true;
             this._timelineEditor._audioTrackWasEnabledBeforeOverride = !!this.properties.audioTrackWasEnabledBeforeOverride;
 
@@ -11930,6 +11979,7 @@ app.registerExtension({
             this.properties.mainTrackEnabled = this._timelineEditor.mainTrackEnabled;
             this.properties.audioTrackEnabled = this._timelineEditor.audioTrackEnabled;
             this.properties.motionTrackEnabled = this._timelineEditor.motionTrackEnabled;
+            this.properties.use_ic_video_size = this._timelineEditor.useICVideoSize;
             this.properties.retakeMode = this._timelineEditor.retakeMode;
             if (tl.showFilenames !== undefined) {
               this.properties.showFilenames = tl.showFilenames;
@@ -11952,6 +12002,10 @@ app.registerExtension({
             }
             if (overrideWidget && tl._hasOverrideAudio) {
               overrideWidget.value = tl.overrideAudio;
+            }
+            const icSizeWidget = this.widgets?.find(w => w.name === "use_ic_video_size");
+            if (icSizeWidget) {
+              icSizeWidget.value = this._timelineEditor.useICVideoSize;
             }
 
             this._timelineEditor.loadMedia();

@@ -749,6 +749,31 @@ def _ltxv_latent_frames(pixel_frames: int) -> int:
 def _dummy_guide_source_dimensions(custom_width=0, custom_height=0):
     return custom_width if custom_width > 0 else 768, custom_height if custom_height > 0 else 512
 
+def _resolve_output_base_dimensions(custom_width=0, custom_height=0, use_ic_video_size=False, is_retake=False, ic_video_dimensions=None):
+    if use_ic_video_size and not is_retake and ic_video_dimensions:
+        return ic_video_dimensions
+    return _dummy_guide_source_dimensions(custom_width, custom_height)
+
+def _first_motion_video_dimensions(tdata: dict):
+    for mseg in tdata.get("motionSegments", []):
+        v_file = mseg.get("videoFile")
+        if not v_file:
+            continue
+        v_path = os.path.join(folder_paths.get_input_directory(), v_file)
+        if not os.path.exists(v_path):
+            basename = os.path.basename(v_file)
+            fallback_path = os.path.join(folder_paths.get_input_directory(), "whatdreamscost", basename)
+            if os.path.exists(fallback_path):
+                v_path = fallback_path
+        if os.path.exists(v_path):
+            try:
+                with av.open(v_path) as container:
+                    stream = container.streams.video[0]
+                    return stream.width or stream.codec_context.width, stream.height or stream.codec_context.height
+            except Exception:
+                pass
+    return None
+
 
 def _add_audio_ref_tokens(conditioning, audio_latent):
     b, c, t, f = audio_latent.shape
@@ -977,6 +1002,10 @@ class LTXDirector(io.ComfyNode):
                     "override_audio", default=False, optional=True,
                     tooltip="Use the audio from the IC-LoRA video instead of using the audio track.",
                 ),
+                io.Boolean.Input(
+                    "use_ic_video_size", default=False, optional=True,
+                    tooltip="When enabled, use the first IC-LoRA reference video's dimensions for the output latent.",
+                ),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -996,7 +1025,7 @@ class LTXDirector(io.ComfyNode):
                 frame_rate=24, display_mode="seconds",
                 custom_width=768, custom_height=512, resize_method="maintain aspect ratio",
                 divisible_by=32, img_compression=0, audio_vae=None, optional_latent=None,
-                use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False) -> io.NodeOutput:
+                use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False, use_ic_video_size=False) -> io.NodeOutput:
 
         # Parse timeline data
         try:
@@ -1007,6 +1036,9 @@ class LTXDirector(io.ComfyNode):
 
         is_retake_mode = tdata.get("retakeMode", False)
         is_retake_active = is_retake_mode and tdata.get("retakeVideo") is not None
+        ic_video_dimensions = _first_motion_video_dimensions(tdata) if use_ic_video_size else None
+        if ic_video_dimensions and not is_retake_mode:
+            custom_width, custom_height = ic_video_dimensions
 
         # Extract global_prompt from timeline_data if not connected/empty
         if not global_prompt:
@@ -1091,7 +1123,13 @@ class LTXDirector(io.ComfyNode):
             # If no images were loaded from the timeline, create a dummy image at strength 0
             # to prevent artifacts in text-to-video mode.
             if not guide_data["images"] and optional_latent is None:
-                src_w, src_h = _dummy_guide_source_dimensions(custom_width, custom_height)
+                src_w, src_h = _resolve_output_base_dimensions(
+                    custom_width,
+                    custom_height,
+                    use_ic_video_size,
+                    is_retake_mode,
+                    ic_video_dimensions,
+                )
                 
                 # Retake base video may define the base canvas. IC-LoRA reference videos must not.
                 tdata_motion = json.loads(timeline_data) if timeline_data else {}
