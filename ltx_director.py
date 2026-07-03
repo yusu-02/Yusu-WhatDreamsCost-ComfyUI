@@ -743,7 +743,7 @@ def _ltxv_pixel_frames(duration_frames: int) -> int:
 
 
 def _ltxv_latent_frames(pixel_frames: int) -> int:
-    return max(1, (max(1, int(pixel_frames)) - 1) // 8)
+    return max(1, ((max(1, int(pixel_frames)) - 1) // 8) + 1)
 
 
 def _dummy_guide_source_dimensions(custom_width=0, custom_height=0):

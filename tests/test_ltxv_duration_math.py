@@ -17,9 +17,12 @@ exec(funcs["_dummy_guide_source_dimensions"], ns)
 
 assert ns["_ltxv_pixel_frames"](1) == 9
 assert ns["_ltxv_pixel_frames"](8) == 9
-assert ns["_ltxv_latent_frames"](9) == 1
+assert ns["_ltxv_latent_frames"](9) == 2
 assert ns["_ltxv_pixel_frames"](149) == 153
-assert ns["_ltxv_latent_frames"](153) == 19
-assert ns["_ltxv_latent_frames"](153) * 8 + 1 == 153
+assert ns["_ltxv_latent_frames"](153) == 20
+assert (ns["_ltxv_latent_frames"](153) - 1) * 8 + 1 == 153
+assert ns["_ltxv_pixel_frames"](360) == 361
+assert ns["_ltxv_latent_frames"](361) == 46
+assert (ns["_ltxv_latent_frames"](361) - 1) * 8 + 1 == 361
 assert ns["_dummy_guide_source_dimensions"]() == (768, 512)
 assert ns["_dummy_guide_source_dimensions"](832, 480) == (832, 480)

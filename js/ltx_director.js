@@ -2721,6 +2721,9 @@ class TimelineEditor {
         const scrollRatio = (this.viewport.scrollLeft + mouseX) / oldWidth;
 
         this.canvas.style.width = newWidth + "px";
+        this.resizeCanvas(newWidth);
+        this._lastWidth = this.viewport.clientWidth;
+        this._lastZoom = this.zoomLevel;
         this.viewport.scrollLeft = scrollRatio * newWidth - mouseX;
 
         if (this.node) this.node.setDirtyCanvas?.(true, true);

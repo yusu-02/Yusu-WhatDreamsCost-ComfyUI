@@ -468,8 +468,12 @@ class LTXDirectorGuide:
 
             # In retake mode, skip normal mode processing entirely and return immediately!
             exact_crop_frames = max(0, int(latent_image.shape[2]) - initial_latent_length)
-            positive = node_helpers.conditioning_set_values(positive, {"nghtdrp_guide_crop_latent_frames": exact_crop_frames})
-            negative = node_helpers.conditioning_set_values(negative, {"nghtdrp_guide_crop_latent_frames": exact_crop_frames})
+            crop_values = {
+                "nghtdrp_guide_crop_latent_frames": exact_crop_frames,
+                "nghtdrp_guide_original_latent_frames": initial_latent_length,
+            }
+            positive = node_helpers.conditioning_set_values(positive, crop_values)
+            negative = node_helpers.conditioning_set_values(negative, crop_values)
             return (positive, negative, {"samples": latent_image, "noise_mask": noise_mask}, model, float(latent_downscale_factor))
 
         # -----------------------------------------------------------------------
@@ -594,8 +598,12 @@ class LTXDirectorGuide:
             print("[LTXDirectorGuide] No timeline guides present. Passing through.")
 
         exact_crop_frames = max(0, int(latent_image.shape[2]) - initial_latent_length)
-        positive = node_helpers.conditioning_set_values(positive, {"nghtdrp_guide_crop_latent_frames": exact_crop_frames})
-        negative = node_helpers.conditioning_set_values(negative, {"nghtdrp_guide_crop_latent_frames": exact_crop_frames})
+        crop_values = {
+            "nghtdrp_guide_crop_latent_frames": exact_crop_frames,
+            "nghtdrp_guide_original_latent_frames": initial_latent_length,
+        }
+        positive = node_helpers.conditioning_set_values(positive, crop_values)
+        negative = node_helpers.conditioning_set_values(negative, crop_values)
 
         return (positive, negative, {"samples": latent_image, "noise_mask": noise_mask}, model, float(latent_downscale_factor))
 
@@ -620,6 +628,23 @@ def _get_exact_crop_count_from_conditioning(conditioning):
         return int(torch.unique(keyframe_idxs[:, 0, :, 0]).shape[0])
     except Exception:
         return 0
+
+def _get_original_latent_frames_from_conditioning(conditioning):
+    value = _conditioning_get_any_value(conditioning, "nghtdrp_guide_original_latent_frames", None)
+    if value is None:
+        return None
+    try:
+        return max(1, int(value))
+    except Exception:
+        return None
+
+def _resolve_crop_frames(latent_frame_count, requested_crop_frames, original_latent_frames=None):
+    requested = max(0, int(requested_crop_frames or 0))
+    current = max(1, int(latent_frame_count or 1))
+    if original_latent_frames is None:
+        return min(requested, max(0, current - 1))
+    extra = max(0, current - max(1, int(original_latent_frames)))
+    return min(requested, extra)
 
 def _get_noise_mask_for_crop(latent):
     latent_image = latent["samples"]
@@ -650,11 +675,13 @@ class LTXDirectorCropGuides:
         latent_image = latent["samples"].clone()
         noise_mask = _get_noise_mask_for_crop(latent)
 
-        crop_frames = _get_exact_crop_count_from_conditioning(positive)
-        if crop_frames <= 0:
-            return (positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
-
-        crop_frames = min(crop_frames, max(0, latent_image.shape[2] - 1))
+        requested_crop_frames = _get_exact_crop_count_from_conditioning(positive)
+        original_latent_frames = _get_original_latent_frames_from_conditioning(positive)
+        crop_frames = _resolve_crop_frames(
+            latent_image.shape[2],
+            requested_crop_frames,
+            original_latent_frames,
+        )
         if crop_frames > 0:
             latent_image = latent_image[:, :, :-crop_frames]
             noise_mask = noise_mask[:, :, :-crop_frames]
@@ -663,6 +690,7 @@ class LTXDirectorCropGuides:
             "keyframe_idxs": None,
             "guide_attention_entries": None,
             "nghtdrp_guide_crop_latent_frames": None,
+            "nghtdrp_guide_original_latent_frames": None,
         }
         positive = node_helpers.conditioning_set_values(positive, clear_values)
         negative = node_helpers.conditioning_set_values(negative, clear_values)
