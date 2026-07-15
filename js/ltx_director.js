@@ -1,5 +1,5 @@
-const { app } = window.comfyAPI.app;
-const { api } = window.comfyAPI.api;
+import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 import { calculatePlaybackDurationFrames, calculateSegmentRange, calculateTimelineDurationFrames, pullSegmentsAfterShrink, pushOverlappingSegmentsForward, shouldAutoSyncDuration, splitSegmentTailAfterShrink } from "./timeline_duration.js";
 import { clampSegmentLengthToSource } from "./director_video_segments.js";
 
