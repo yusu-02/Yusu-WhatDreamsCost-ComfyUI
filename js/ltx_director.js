@@ -6534,10 +6534,10 @@ class TimelineEditor {
           let displayText = labelText;
           const maxTextW = Math.max(0, boxW - labelPadX * 2 - 8);
           if (this.ctx.measureText(displayText).width > maxTextW) {
-            while (displayText.length > 0 && this.ctx.measureText(displayText + "...).width > maxTextW) {
+            while (displayText.length > 0 && this.ctx.measureText(displayText + "...").width > maxTextW) {
               displayText = displayText.slice(0, -1);
             }
-            displayText = displayText.length > 0 ? displayText + "... : "";
+            displayText = displayText.length > 0 ? displayText + "..." : "";
           }
 
           if (displayText.length > 0) {
@@ -6584,10 +6584,10 @@ class TimelineEditor {
           this.ctx.textBaseline = "middle";
           const maxFileTextW = videoWidthPx - 42 - 10;
           if (this.ctx.measureText(fname).width > maxFileTextW) {
-            while (fname.length > 0 && this.ctx.measureText(fname + "...).width > maxFileTextW) {
+            while (fname.length > 0 && this.ctx.measureText(fname + "...").width > maxFileTextW) {
               fname = fname.slice(0, -1);
             }
-            fname += "...;
+            fname += "...";
           }
           const textW = this.ctx.measureText(fname).width;
           this.ctx.fillStyle = "rgba(0, 0, 0, 0.50)";
@@ -6758,10 +6758,10 @@ class TimelineEditor {
               this.ctx.textBaseline = "middle";
               const maxFileTextW = pxWidth - 42 - 10;
               if (this.ctx.measureText(fname).width > maxFileTextW) {
-                while (fname.length > 0 && this.ctx.measureText(fname + "...).width > maxFileTextW) {
+                while (fname.length > 0 && this.ctx.measureText(fname + "...").width > maxFileTextW) {
                   fname = fname.slice(0, -1);
                 }
-                fname += "...;
+                fname += "...";
               }
               const textW = this.ctx.measureText(fname).width;
               this.ctx.fillStyle = "rgba(0, 0, 0, 0.50)";
@@ -6797,10 +6797,10 @@ class TimelineEditor {
               this.ctx.textBaseline = "middle";
               const maxFileTextW = pxWidth - 42 - 10;
               if (this.ctx.measureText(fname).width > maxFileTextW) {
-                while (fname.length > 0 && this.ctx.measureText(fname + "...).width > maxFileTextW) {
+                while (fname.length > 0 && this.ctx.measureText(fname + "...").width > maxFileTextW) {
                   fname = fname.slice(0, -1);
                 }
-                fname += "...;
+                fname += "...";
               }
               const textW = this.ctx.measureText(fname).width;
               this.ctx.fillStyle = "rgba(0, 0, 0, 0.50)";
@@ -6860,10 +6860,10 @@ class TimelineEditor {
             const maxTextW = pxWidth - 10;
             let label = seg.prompt;
             if (this.ctx.measureText(label).width > maxTextW) {
-              while (label.length > 0 && this.ctx.measureText(label + "...).width > maxTextW) {
+              while (label.length > 0 && this.ctx.measureText(label + "...").width > maxTextW) {
                 label = label.slice(0, -1);
               }
-              label += "...;
+              label += "...";
             }
 
             this.ctx.fillText(label, startX + pxWidth / 2, overlayY + overlayH / 2);
@@ -6900,7 +6900,7 @@ class TimelineEditor {
             const maxLines = Math.max(1, Math.floor((this.blockHeight - pad * 2) / lineH));
             if (lines.length > maxLines) {
               lines = lines.slice(0, maxLines);
-              lines[lines.length - 1] += "...;
+              lines[lines.length - 1] += "...";
             }
 
             const totalTextHeight = lines.length * lineH;
@@ -7084,10 +7084,10 @@ class TimelineEditor {
               this.ctx.textBaseline = "middle";
               const maxFileTextW = pxWidth - 75 - 10;
               if (this.ctx.measureText(fname).width > maxFileTextW) {
-                while (fname.length > 0 && this.ctx.measureText(fname + "...).width > maxFileTextW) {
+                while (fname.length > 0 && this.ctx.measureText(fname + "...").width > maxFileTextW) {
                   fname = fname.slice(0, -1);
                 }
-                fname += "...;
+                fname += "...";
               }
               const textW = this.ctx.measureText(fname).width;
               this.ctx.fillStyle = "rgba(0, 0, 0, 0.50)";
@@ -7124,10 +7124,10 @@ class TimelineEditor {
             const maxTextW = pxWidth - 10;
             let label = globalPromptStr;
             if (this.ctx.measureText(label).width > maxTextW) {
-              while (label.length > 0 && this.ctx.measureText(label + "...).width > maxTextW) {
+              while (label.length > 0 && this.ctx.measureText(label + "...").width > maxTextW) {
                 label = label.slice(0, -1);
               }
-              label += "...;
+              label += "...";
             }
 
             this.ctx.fillText(label, startX + pxWidth / 2, overlayY + overlayH / 2);
