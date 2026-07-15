@@ -4,6 +4,7 @@ import json
 import base64
 import io as _io
 import math
+import weakref
 
 import numpy as np
 import torch
@@ -29,7 +30,7 @@ from .prompt_relay import (
     distribute_segment_lengths,
 )
 
-from .patches import detect_model_type, apply_patches
+from .patches import detect_model_type, apply_patches, get_current_node_id
 
 log = logging.getLogger(__name__)
 
@@ -746,6 +747,30 @@ def _ltxv_latent_frames(pixel_frames: int) -> int:
     return max(1, ((max(1, int(pixel_frames)) - 1) // 8) + 1)
 
 
+def _fit_latent_time(latent: dict, target_frames: int) -> dict:
+    samples = latent.get("samples")
+    if samples is None or samples.ndim != 5 or samples.shape[2] == target_frames:
+        return latent
+
+    out = dict(latent)
+    current = samples.shape[2]
+    if current > target_frames:
+        out["samples"] = samples[:, :, :target_frames]
+        if latent.get("noise_mask") is not None:
+            out["noise_mask"] = latent["noise_mask"][:, :, :target_frames]
+        return out
+
+    pad_shape = list(samples.shape)
+    pad_shape[2] = target_frames - current
+    out["samples"] = torch.cat([samples, torch.zeros(pad_shape, device=samples.device, dtype=samples.dtype)], dim=2)
+    if latent.get("noise_mask") is not None:
+        mask = latent["noise_mask"]
+        mask_pad_shape = list(mask.shape)
+        mask_pad_shape[2] = target_frames - current
+        out["noise_mask"] = torch.cat([mask, torch.ones(mask_pad_shape, device=mask.device, dtype=mask.dtype)], dim=2)
+    return out
+
+
 def _dummy_guide_source_dimensions(custom_width=0, custom_height=0):
     return custom_width if custom_width > 0 else 768, custom_height if custom_height > 0 else 512
 
@@ -818,6 +843,9 @@ def _convert_to_latent_lengths(pixel_lengths, temporal_stride, latent_frames):
     return result
 
 
+_CLONED_MODEL_CACHE = weakref.WeakKeyDictionary()
+
+
 def _encode_relay(model, clip, latent, global_prompt, local_prompts, segment_lengths, epsilon, transition_smoothness=""):
     for name, val in (("global_prompt", global_prompt),
                       ("local_prompts", local_prompts),
@@ -832,13 +860,29 @@ def _encode_relay(model, clip, latent, global_prompt, local_prompts, segment_len
 
     # Split prompts but do NOT filter out empty ones yet, so we can detect them
     locals_list = [p.strip() for p in local_prompts.split("|")]
-    
-    # If there are no visual segments on the timeline (e.g., only using IC-LoRA motion track),
-    # bypass the local prompt chunking entirely and just use the global prompt.
-    if not locals_list or (len(locals_list) == 1 and not locals_list[0]):
-        log.info("[PromptRelay] No local segments found. Using global prompt exclusively.")
-        conditioning = clip.encode_from_tokens_scheduled(clip.tokenize(global_prompt))
-        return model.clone(), conditioning
+
+    unique_id = get_current_node_id()
+
+    # Single-prompt timelines do not need Prompt Relay masking. Keep this fast path
+    # so normal T2V/I2V/V2V runs are as light as a regular conditioning pass.
+    if len(locals_list) <= 1:
+        local_p = locals_list[0] if (locals_list and locals_list[0]) else ""
+        if global_prompt.strip() and local_p.strip():
+            active_prompt = f"{global_prompt.strip()}, {local_p.strip()}"
+        else:
+            active_prompt = local_p.strip() if local_p.strip() else global_prompt.strip()
+
+        log.info("[PromptRelay] Single prompt workflow detected. Bypassing attention masking.")
+        conditioning = clip.encode_from_tokens_scheduled(clip.tokenize(active_prompt))
+
+        node_cache = _CLONED_MODEL_CACHE.setdefault(model, {})
+        cache_key = ("unpatched", unique_id)
+        if cache_key not in node_cache:
+            patched = model.clone()
+            to = patched.model_options.setdefault("transformer_options", {})
+            to["promptrelay_mask_fn"] = None
+            node_cache[cache_key] = patched
+        return node_cache[cache_key], conditioning
 
     # Check if any specific segment is empty and apply fallbacks
     for i, p in enumerate(locals_list):
@@ -878,8 +922,17 @@ def _encode_relay(model, clip, latent, global_prompt, local_prompts, segment_len
     q_token_idx = build_segments(token_ranges, effective_lengths, epsilon)
     mask_fn = create_mask_fn(q_token_idx, tokens_per_frame, latent_frames)
 
-    patched = model.clone()
-    apply_patches(patched, arch, mask_fn)
+    node_cache = _CLONED_MODEL_CACHE.setdefault(model, {})
+    cache_key = ("patched", unique_id)
+    if cache_key in node_cache:
+        patched = node_cache[cache_key]
+    else:
+        patched = model.clone()
+        apply_patches(patched, arch, None)
+        node_cache[cache_key] = patched
+
+    to = patched.model_options.setdefault("transformer_options", {})
+    to["promptrelay_mask_fn"] = mask_fn
 
     return patched, conditioning
 
@@ -1187,6 +1240,14 @@ class LTXDirector(io.ComfyNode):
         # --- Auto-generate LTXV latent if none was provided ---
         # Apply the community 8n+1 rule directly to the timeline's duration_frames.
         ltxv_length = _ltxv_pixel_frames(duration_frames)
+        log.info(
+            "[YusuLTXDirector] Range: start=%s duration=%s ltxv_length=%s fps=%s optional_latent=%s",
+            start_frame,
+            duration_frames,
+            ltxv_length,
+            frame_rate,
+            optional_latent is not None,
+        )
         
         if optional_latent is None:
             latent_w = max(32, (derived_w // 32) * 32)
@@ -1203,7 +1264,7 @@ class LTXDirector(io.ComfyNode):
                 latent_w, latent_h, ltxv_length, latent_t,
             )
         else:
-            latent = optional_latent
+            latent = _fit_latent_time(optional_latent, _ltxv_latent_frames(ltxv_length))
 
         patched, conditioning = _encode_relay(
             model, clip, latent, global_prompt, local_prompts, segment_lengths, epsilon, transition_smoothness,
@@ -1240,6 +1301,13 @@ class LTXDirector(io.ComfyNode):
                             raise ValueError(
                                 f"Expected custom audio waveform with 2 or 3 dims, got shape {tuple(waveform.shape)}"
                             )
+                        log.info(
+                            "[YusuLTXDirector] Audio waveform: shape=%s peak=%.4f rms=%.4f sr=%s",
+                            tuple(waveform.shape),
+                            float(waveform.abs().max().item()),
+                            float(torch.sqrt(torch.mean(waveform.float() ** 2)).item()),
+                            audio_out.get("sample_rate"),
+                        )
 
                         # Wrapped ComfyUI VAE expects (batch, samples, channels);
                         # raw AudioVAE expects a dict with waveform in (batch, channels, samples).
@@ -1254,6 +1322,13 @@ class LTXDirector(io.ComfyNode):
                         if latent_samples.numel() == 0:
                             raise ValueError("Encoded audio latent is empty (0 elements).")
                         conditioning = _add_audio_ref_tokens(conditioning, latent_samples)
+                        log.info(
+                            "[YusuLTXDirector] AV latent plan: video=%s audio=%s ltxv_length=%s fps=%s",
+                            tuple(latent["samples"].shape) if isinstance(latent, dict) and "samples" in latent else None,
+                            tuple(latent_samples.shape),
+                            ltxv_length,
+                            frame_rate,
+                        )
                         
                         # 2. Create a 3D gap mask [B, F, H] to avoid accidental broadcasting to the 5D video latent 
                         # which also has 128 channels. A 4D audio mask [1, 128, F, H] confuses ComfyUI's KSampler 
@@ -1324,7 +1399,13 @@ class LTXDirector(io.ComfyNode):
                             "type": "audio",
                             "noise_mask": mask
                         }
-                        log.info("[PromptRelay] Generated custom audio latent with dynamic noise mask.")
+                        log.info(
+                            "[YusuLTXDirector] Audio mask: shape=%s denoise_mean=%.4f preserve_mean=%.4f inpaint=%s",
+                            tuple(mask.shape),
+                            float(mask.float().mean().item()),
+                            float((1.0 - mask.float()).mean().item()),
+                            inpaint_audio,
+                        )
                     else:
                         raise ValueError("No audio waveform to encode.")
                 except Exception as e:
@@ -1362,6 +1443,16 @@ class LTXDirector(io.ComfyNode):
                 clipped_len = min(length - offset, duration_frames - new_start)
                 if clipped_len <= 0:
                     continue
+                log.info(
+                    "[YusuLTXDirector] Motion segment: file=%s start=%s length=%s trim=%s -> start=%s length=%s offset=%s",
+                    seg.get("fileName") or seg.get("videoFile"),
+                    seg_start,
+                    length,
+                    seg.get("trimStart", 0),
+                    new_start,
+                    clipped_len,
+                    offset,
+                )
                     
                 clean = dict(seg)
                 clean["start"] = new_start

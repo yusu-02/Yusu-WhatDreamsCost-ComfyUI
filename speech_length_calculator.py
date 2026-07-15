@@ -26,8 +26,8 @@ class SpeechLengthCalculator:
         # Prioritize the connected text_input if provided, otherwise fallback to the text widget
         active_text = text_input if (text_input is not None and isinstance(text_input, str) and text_input.strip() != "") else text
         
-        # Regex to find words inside double quotes, single quotes, or smart quotes
-        matches = re.findall(r'"([^"]*)"|\'([^\']*)\'|“([^”]*)”|‘([^’]*)’', active_text)
+        # Match spoken text in double quotes only.
+        matches = re.findall(r'"([^"]*)"|“([^”]*)”', active_text)
         
         # Extract matches, handling all possible captured groups from the regex
         quoted_text = " ".join([next((g for g in m if g), "") for m in matches])

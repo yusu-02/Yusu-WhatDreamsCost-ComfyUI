@@ -1,6 +1,19 @@
+import inspect
 import types
 import torch
 import comfy.ldm.modules.attention
+
+
+def get_current_node_id() -> str:
+    try:
+        frame = inspect.currentframe()
+        while frame:
+            if "unique_id" in frame.f_locals:
+                return str(frame.f_locals["unique_id"])
+            frame = frame.f_back
+    except Exception:
+        pass
+    return "default_relay"
 
 
 def _masked_attention(q, k, v, heads, mask, transformer_options={}, **kwargs):
@@ -18,7 +31,8 @@ def _wan_t2v_forward(self, mask_fn, x, context, transformer_options={}, **kwargs
     k = self.norm_k(self.k(context))
     v = self.v(context)
 
-    mask = mask_fn(q, k, transformer_options)
+    active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
+    mask = active_mask_fn(q, k, transformer_options) if active_mask_fn is not None else None
     if mask is not None:
         x = _masked_attention(q, k, v, heads=self.num_heads, mask=mask,
                               transformer_options=transformer_options)
@@ -44,7 +58,8 @@ def _wan_i2v_forward(self, mask_fn, x, context, context_img_len, transformer_opt
     k = self.norm_k(self.k(context_text))
     v = self.v(context_text)
 
-    mask = mask_fn(q, k, transformer_options)
+    active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
+    mask = active_mask_fn(q, k, transformer_options) if active_mask_fn is not None else None
     if mask is not None:
         x = _masked_attention(q, k, v, heads=self.num_heads, mask=mask,
                               transformer_options=transformer_options)
@@ -71,7 +86,8 @@ def _ltx_forward(self, mask_fn, x, context=None, mask=None, pe=None, k_pe=None, 
         k = apply_rotary_emb(k, pe if k_pe is None else k_pe)
 
     if not is_self_attn:
-        temporal_mask = mask_fn(q, k, transformer_options)
+        active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
+        temporal_mask = active_mask_fn(q, k, transformer_options) if active_mask_fn is not None else None
         if temporal_mask is not None:
             mask = temporal_mask if mask is None else mask + temporal_mask
 
@@ -106,7 +122,9 @@ class _CrossAttnPatch:
         impl, mask_fn = self.impl, self.mask_fn
 
         def wrapped(self_module, *args, **kwargs):
-            return impl(self_module, mask_fn, *args, **kwargs)
+            transformer_options = kwargs.get("transformer_options", {})
+            active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
+            return impl(self_module, active_mask_fn, *args, **kwargs)
 
         return types.MethodType(wrapped, obj)
 

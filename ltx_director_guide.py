@@ -9,6 +9,7 @@ import comfy.sd
 import comfy.utils
 import folder_paths
 import node_helpers
+from PIL import Image
 from comfy_extras import nodes_lt
 from comfy_api.latest import io
 from .ltx_director import GuideData, MotionGuideData, _resize_image
@@ -182,6 +183,19 @@ def _resolve_input_video_path(video_file):
     except Exception:
         pass
     raise FileNotFoundError(f"Could not find motion guide video: {video_file}")
+
+
+def _is_image_file(path):
+    return str(path).lower().split("?", 1)[0].endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"))
+
+
+def _load_motion_image_frames(image_file, length_frames):
+    path = _resolve_input_video_path(image_file)
+    with Image.open(path) as img:
+        arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
+    frame = torch.from_numpy(arr).unsqueeze(0)
+    return frame.repeat(max(1, int(round(float(length_frames)))), 1, 1, 1)
+
 
 class ResampleGuideFrames:
     def execute(self, images, source_fps, target_fps, target_num_frames, mode):
@@ -537,7 +551,10 @@ class LTXDirectorGuide:
                         continue
 
                     start_frame_aligned = start_frame
-                    video_frames = _load_motion_video_frames(video_file, trim_start, length_frames, director_fps, seg.get("resampleMode", "nearest"))
+                    if seg.get("isStaticImage") or _is_image_file(video_file):
+                        video_frames = _load_motion_image_frames(video_file, length_frames)
+                    else:
+                        video_frames = _load_motion_video_frames(video_file, trim_start, length_frames, director_fps, seg.get("resampleMode", "nearest"))
 
                     num_frames_to_keep = ((video_frames.shape[0] - 1) // time_scale_factor) * time_scale_factor + 1
                     video_frames = video_frames[:num_frames_to_keep]

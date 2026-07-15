@@ -43,6 +43,30 @@ Released: 2026-07-02
 - Removed obsolete full-audio restore/add-at-playhead context-menu actions.
 - Removed noisy debug logging from the Director timeline editor.
 
+## Version 2.0.2
+
+Released: 2026-07-15
+
+### Added
+
+- Added IC-LoRA image segment support on the IC track, including toolbar upload, drag-and-drop, and gap-menu insertion.
+- Added a small regression test for IC-LoRA image file detection.
+
+### Improved
+
+- Optimized image, audio, video, and IC video imports so timeline segments appear immediately while upload/decoding continues in the background.
+- Optimized Prompt Relay for single-prompt timelines by bypassing attention masking and reusing patched model clones per node.
+- Improved IC video loading by using metadata-first loading, reducing the wait before clips appear on the timeline.
+
+### Fixed
+
+- Fixed newly inserted main-track images covering later images/text/video segments by restoring insertion physics in the fast upload path.
+- Fixed the first main-track image drop not snapping to frame 0 when the track is empty.
+- Fixed IC-LoRA image segments being treated as videos by the guide node.
+- Fixed static IC-LoRA images being sent through video scrubbing, thumbnail extraction, and motion-audio preview paths.
+- Fixed optional latent time alignment by cropping or padding connected latents to the Director target frame count.
+- Updated `YusuSpeechLengthCalculator` so dialogue length detection only reads text inside double quotes and Chinese double quotes.
+
 ## Node Namespace
 
 This fork registers the following Yusu node IDs:
