@@ -88,6 +88,12 @@ Released: 2026-07-16
 - Fixed failed manual IC uploads incorrectly suppressing a connected IC input.
 - Fixed `IC Size` selection priority so a valid manual IC clip takes precedence over connected frame dimensions.
 - Fixed Prompt Relay compatibility with newer `ComfyUI-KJNodes` LTX2 NAG mask callbacks, supporting both the original 3-argument call and the newer 5-argument call.
+- Fixed legacy workflow widget migration across historical 19/21/22/23-field layouts, preventing raw Director widgets, shifted values, and invalid `NaN` parameters.
+- Restored the `IC-LoRA Video` input automatically when loading workflows saved before that input existed.
+
+### Compatibility
+
+- Declared ComfyUI `v0.3.48` as the minimum supported version because the plugin uses `comfy_api.latest`.
 
 ## Node Namespace
 

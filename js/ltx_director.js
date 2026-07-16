@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { calculatePlaybackDurationFrames, calculateSegmentRange, calculateTimelineDurationFrames, pullSegmentsAfterShrink, pushOverlappingSegmentsForward, shouldAutoSyncDuration, splitSegmentTailAfterShrink } from "./timeline_duration.js";
 import { clampSegmentLengthToSource } from "./director_video_segments.js";
+import { normalizeDirectorWidgetValue, selectDirectorWidgetSchema } from "./director_widget_migration.js";
 
 // --- UI Constants & Configuration ---
 const RULER_HEIGHT = 24;
@@ -11945,6 +11946,32 @@ const APPENDED_WIDGET_DEFAULTS = [
   ["segment_lengths", ""],
   ["transition_smoothness", ""],
 ];
+const DIRECTOR_WIDGET_DEFAULTS = {
+  inpaint_audio: true,
+  override_audio: false,
+  use_ic_video_size: false,
+  use_custom_audio: false,
+  use_custom_motion: true,
+  frame_rate: 24,
+  display_mode: "seconds",
+  custom_width: 0,
+  custom_height: 0,
+  resize_method: "maintain aspect ratio",
+  divisible_by: 32,
+  img_compression: 18,
+  guide_strength: "",
+  transition_smoothness: "",
+  local_prompts: "",
+  segment_lengths: "",
+  timeline_data: "{}",
+  epsilon: 0.001,
+  start_second: 0.0,
+  end_second: 5.0,
+  duration_seconds: 5.0,
+  start_frame: 0,
+  end_frame: 120,
+  duration_frames: 120,
+};
 
 function markYusuNode(node) {
   if (!node.properties) node.properties = {};
@@ -12158,6 +12185,9 @@ app.registerExtension({
           this.properties = { ...this.properties, ...info.properties };
         }
         markYusuNode(this);
+        if (!this.inputs?.some(input => input.name === "ic_lora_video")) {
+          this.addInput?.("ic_lora_video", "IMAGE", { shape: 7 });
+        }
 
         // Helper to set widget value, sync DOM element, and trigger callbacks safely
         const setWidgetValue = (w, val) => {
@@ -12179,96 +12209,42 @@ app.registerExtension({
           }
         };
 
-        // 2. Check if we have serialized properties. If so, restore widgets from properties!
-        if (info.properties && info.properties.has_serialized_properties) {
+        // Prefer named properties whenever an older workflow already contains them.
+        const namedWidgetPropertyCount = info.properties
+          ? (this.widgets || []).filter(
+            w => w.name && Object.prototype.hasOwnProperty.call(info.properties, w.name)
+          ).length
+          : 0;
+        const hasNamedWidgetProperties = namedWidgetPropertyCount >= 8;
+        if (info.properties && (info.properties.has_serialized_properties || hasNamedWidgetProperties)) {
           if (this.widgets) {
             for (const w of this.widgets) {
               if (w.name && this.properties[w.name] !== undefined) {
-                setWidgetValue(w, this.properties[w.name]);
+                setWidgetValue(
+                  w,
+                  normalizeDirectorWidgetValue(w.name, this.properties[w.name], DIRECTOR_WIDGET_DEFAULTS[w.name]),
+                );
               }
             }
           }
         } else if (info.widgets_values) {
-          // Fallback to name-based schema mapping for older workflows
-          const SCHEMA_19 = [
-            "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
-            "epsilon", "frame_rate", "display_mode", "guide_strength", "custom_width", "custom_height",
-            "resize_method", "divisible_by", "img_compression", "timeline_ui"
-          ];
-          const SCHEMA_21_NO_INPAINT = [
-            "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "local_prompts", "segment_lengths", "epsilon", "guide_strength",
-            "use_custom_audio", "use_custom_motion", "frame_rate", "display_mode", "custom_width", "custom_height",
-            "resize_method", "divisible_by", "img_compression", "timeline_ui"
-          ];
-          const SCHEMA_22_NO_INPAINT = [
-            "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "local_prompts", "segment_lengths", "epsilon", "guide_strength",
-            "use_custom_audio", "use_custom_motion", "frame_rate", "display_mode", "custom_width", "custom_height",
-            "resize_method", "divisible_by", "img_compression", "override_audio", "timeline_ui"
-          ];
-          const SCHEMA_22_WITH_INPAINT = [
-            "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
-            "epsilon", "frame_rate", "display_mode", "guide_strength", "custom_width", "custom_height",
-            "resize_method", "divisible_by", "img_compression", "timeline_ui"
-          ];
-          const SCHEMA_23 = [
-            "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
-            "epsilon", "frame_rate", "display_mode", "guide_strength", "custom_width", "custom_height",
-            "resize_method", "divisible_by", "img_compression", "override_audio", "timeline_ui"
-          ];
-
-          const ALL_WIDGET_DEFAULTS = {
-            inpaint_audio: true,
-            override_audio: false,
-            use_ic_video_size: false,
-            use_custom_audio: false,
-            use_custom_motion: true,
-            frame_rate: 24,
-            display_mode: "seconds",
-            custom_width: 0,
-            custom_height: 0,
-            resize_method: "maintain aspect ratio",
-            divisible_by: 32,
-            img_compression: 18,
-            guide_strength: "",
-            transition_smoothness: "",
-            local_prompts: "",
-            segment_lengths: "",
-            timeline_data: "{}",
-            epsilon: 0.001,
-            start_second: 0.0,
-            end_second: 5.0,
-            duration_seconds: 5.0,
-            start_frame: 0,
-            end_frame: 120,
-            duration_frames: 120,
-          };
-
-          let names = SCHEMA_23;
+          const names = selectDirectorWidgetSchema(info.widgets_values);
           const len = info.widgets_values.length;
-          if (len <= 19) {
-            names = SCHEMA_19;
-          } else if (len === 21) {
-            names = SCHEMA_21_NO_INPAINT;
-          } else if (len === 22) {
-            if (typeof info.widgets_values[13] === "number") {
-              names = SCHEMA_22_NO_INPAINT;
-            } else {
-              names = SCHEMA_22_WITH_INPAINT;
-            }
-          }
 
           if (this.widgets) {
             for (const w of this.widgets) {
               const schemaIdx = names.indexOf(w.name);
               if (schemaIdx !== -1 && schemaIdx < len) {
-                setWidgetValue(w, info.widgets_values[schemaIdx]);
-              } else if (ALL_WIDGET_DEFAULTS.hasOwnProperty(w.name)) {
-                setWidgetValue(w, ALL_WIDGET_DEFAULTS[w.name]);
+                setWidgetValue(
+                  w,
+                  normalizeDirectorWidgetValue(
+                    w.name,
+                    info.widgets_values[schemaIdx],
+                    DIRECTOR_WIDGET_DEFAULTS[w.name],
+                  ),
+                );
+              } else if (Object.prototype.hasOwnProperty.call(DIRECTOR_WIDGET_DEFAULTS, w.name)) {
+                setWidgetValue(w, DIRECTOR_WIDGET_DEFAULTS[w.name]);
               }
             }
           }
@@ -12282,6 +12258,16 @@ app.registerExtension({
             }
           }
           this.properties.has_serialized_properties = true;
+        }
+
+        for (const w of this.widgets || []) {
+          if (Object.prototype.hasOwnProperty.call(DIRECTOR_WIDGET_DEFAULTS, w.name)) {
+            setWidgetValue(
+              w,
+              normalizeDirectorWidgetValue(w.name, w.value, DIRECTOR_WIDGET_DEFAULTS[w.name]),
+            );
+            this.properties[w.name] = w.value;
+          }
         }
 
         for (const [name, def] of APPENDED_WIDGET_DEFAULTS) {
