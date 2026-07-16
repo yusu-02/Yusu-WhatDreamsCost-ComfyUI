@@ -800,6 +800,58 @@ def _first_motion_video_dimensions(tdata: dict):
     return None
 
 
+def _append_ic_lora_frames(
+    motion_guide_data: dict,
+    frames,
+    start_frame: int,
+    duration_frames: int,
+    segment: dict | None = None,
+) -> None:
+    if frames is None:
+        return
+    if not torch.is_tensor(frames) or frames.ndim != 4:
+        raise ValueError("IC-LoRA Video must be an IMAGE batch shaped [frames, height, width, channels].")
+
+    source_frames = int(frames.shape[0])
+    segment = segment or {}
+    seg_start = int(segment.get("start", start_frame))
+    trim_start = max(0, int(segment.get("trimStart", 0)))
+    seg_length = max(1, int(segment.get("length", source_frames)))
+    if seg_start >= start_frame + duration_frames or seg_start + seg_length <= start_frame:
+        return
+
+    offset = max(0, start_frame - seg_start)
+    source_start = trim_start + offset
+    new_start = max(0, seg_start - start_frame)
+    length = min(seg_length - offset, duration_frames - new_start, source_frames - source_start)
+    if length <= 0:
+        return
+
+    motion_guide_data["segments"].insert(0, {
+        "id": "ic_lora_input",
+        "type": "motion_video",
+        "start": new_start,
+        "length": length,
+        "trimStart": source_start,
+        "videoDurationFrames": source_frames,
+        "videoFrames": frames[source_start:source_start + length],
+        "fileName": "Connected IMAGE frames",
+        "videoStrength": 1.0,
+        "videoAttentionStrength": 0.65,
+        "resampleMode": "nearest",
+        "linkedICFrames": True,
+    })
+
+
+def _has_manual_ic_segment(tdata: dict) -> bool:
+    return any(
+        seg.get("type") == "motion_video"
+        and not seg.get("linkedICFrames")
+        and bool(seg.get("videoFile"))
+        for seg in tdata.get("motionSegments", [])
+    )
+
+
 def _add_audio_ref_tokens(conditioning, audio_latent):
     b, c, t, f = audio_latent.shape
     ref_audio = {"tokens": audio_latent.permute(0, 2, 1, 3).reshape(b, t, c * f)}
@@ -960,6 +1012,11 @@ class LTXDirector(io.ComfyNode):
                     "global_prompt", multiline=True, default="", force_input=True, optional=True,
                     tooltip="Conditions the entire video. Anchors persistent characters, objects, and scene context.",
                 ),
+                io.Image.Input(
+                    "ic_lora_video", optional=True,
+                    display_name="IC-LoRA Video",
+                    tooltip="Connect IMAGE frames from a regular video loader for IC-LoRA motion guidance.",
+                ),
                 io.Float.Input(
                     "start_second", default=0.0, min=0.0, max=1000.0, step=0.01,
                     tooltip="Start time in seconds of the timeline generation.",
@@ -1078,7 +1135,8 @@ class LTXDirector(io.ComfyNode):
                 frame_rate=24, display_mode="seconds",
                 custom_width=768, custom_height=512, resize_method="maintain aspect ratio",
                 divisible_by=32, img_compression=0, audio_vae=None, optional_latent=None,
-                use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False, use_ic_video_size=False) -> io.NodeOutput:
+                use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False,
+                use_ic_video_size=False, ic_lora_video=None) -> io.NodeOutput:
 
         # Parse timeline data
         try:
@@ -1086,10 +1144,13 @@ class LTXDirector(io.ComfyNode):
         except Exception as e:
             log.error(f"[LTXDirector] execute timeline_data parse error: {e}")
             tdata = {}
-
+        manual_ic_active = _has_manual_ic_segment(tdata)
         is_retake_mode = tdata.get("retakeMode", False)
         is_retake_active = is_retake_mode and tdata.get("retakeVideo") is not None
-        ic_video_dimensions = _first_motion_video_dimensions(tdata) if use_ic_video_size else None
+        if use_ic_video_size and not manual_ic_active and torch.is_tensor(ic_lora_video) and ic_lora_video.ndim == 4:
+            ic_video_dimensions = (int(ic_lora_video.shape[2]), int(ic_lora_video.shape[1]))
+        else:
+            ic_video_dimensions = _first_motion_video_dimensions(tdata) if use_ic_video_size else None
         if ic_video_dimensions and not is_retake_mode:
             custom_width, custom_height = ic_video_dimensions
 
@@ -1424,6 +1485,18 @@ class LTXDirector(io.ComfyNode):
         motion_guide_data = {"segments": [], "frame_rate": float(frame_rate), "duration_frames": int(duration_frames), "resize_method": resize_method}
         try:
             tdata = json.loads(timeline_data) if timeline_data else {}
+            if use_custom_motion and not manual_ic_active:
+                linked_segment = next(
+                    (seg for seg in tdata.get("motionSegments", []) if seg.get("linkedICFrames")),
+                    None,
+                )
+                _append_ic_lora_frames(
+                    motion_guide_data,
+                    ic_lora_video,
+                    start_frame,
+                    duration_frames,
+                    linked_segment,
+                )
             if use_custom_motion:
                 motion_segments = tdata.get("motionSegments", [])
             else:

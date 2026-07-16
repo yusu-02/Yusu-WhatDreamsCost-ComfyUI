@@ -805,6 +805,7 @@ class TimelineEditor {
     this._lastWidth = 0;
     this._hoveredGapIdx = -1;
     this._isHovering = false;
+    this._destroyed = false;
 
     // Playback state
     this.currentFrame = 0;
@@ -1147,7 +1148,7 @@ class TimelineEditor {
     }
 
     // Polling is much more reliable in Comfy than ResizeObserver due to scale transforms
-    this._renderLoop = requestAnimationFrame(() => this.checkResize());
+    this._renderLoop = setTimeout(() => this.checkResize(), 100);
   }
 
   isMultiSelectActive() {
@@ -1270,10 +1271,27 @@ class TimelineEditor {
   }
 
   destroy() {
-    cancelAnimationFrame(this._renderLoop);
+    this._destroyed = true;
+    clearTimeout(this._renderLoop);
+    cancelAnimationFrame(this._mouseMoveFrame);
     this.pauseAudio();
     window.removeEventListener("keydown", this.handleKeyDown, true);
     window.removeEventListener("paste", this.handlePaste, true);
+    window.removeEventListener("mousemove", this._windowMouseMove);
+    window.removeEventListener("mouseup", this._windowMouseUp);
+    document.removeEventListener("mousemove", this._globalPropMouseMove);
+    document.removeEventListener("mouseup", this._globalPropMouseUp);
+    this.dismissContextMenu?.();
+    this.dismissGapMenu?.();
+    this.dismissSettingsMenu?.();
+    for (const video of this._videoElementsCache?.values?.() || []) {
+      try { video.pause(); } catch (_) { }
+    }
+    this._videoElementsCache?.clear?.();
+    this._thumbnailCache?.clear?.();
+    this._thumbnailPromises?.clear?.();
+    this._audioBufferCache?.clear?.();
+    this.audioContext?.close?.().catch?.(() => { });
   }
 
   getStartFrames() {
@@ -2127,6 +2145,80 @@ class TimelineEditor {
     }
   }
 
+  syncLinkedICFrames(linkId, sourceNode) {
+    const widgetValue = (name, fallback = 0) => {
+      const value = sourceNode?.widgets?.find(w => w.name === name)?.value;
+      return Number.isFinite(Number(value)) ? Number(value) : fallback;
+    };
+    const connected = linkId != null;
+    const frameCount = Math.max(1,
+      widgetValue("frame_count") ||
+      widgetValue("duration_frames") ||
+      Math.round(widgetValue("duration") * this.getFrameRate()) ||
+      this.getDurationFrames()
+    );
+    const signature = connected ? `${linkId}|${frameCount}` : "";
+    const previous = this.timeline.motionSegments.find(seg => seg.linkedICFrames);
+    const hasManualICSegment = this.timeline.motionSegments.some(
+      seg => !seg.linkedICFrames
+        && seg.type === "motion_video"
+        && (Boolean(seg.videoFile) || seg._uploading === true)
+    );
+
+    if (connected && hasManualICSegment) {
+      if (previous) {
+        const previousEnd = previous.start + previous.length;
+        this.timeline.motionSegments = this.timeline.motionSegments.filter(seg => !seg.linkedICFrames);
+        pullSegmentsAfterShrink(
+          this.timeline.motionSegments,
+          previousEnd,
+          previous.start,
+          previous.id,
+        );
+        this.commitChanges(true);
+        this.render();
+      }
+      this._linkedICFramesSignature = signature;
+      return;
+    }
+
+    if (signature === this._linkedICFramesSignature && ((!connected && !previous) || (connected && previous))) return;
+    if (!connected && !previous) {
+      this._linkedICFramesSignature = signature;
+      return;
+    }
+
+    const previousEnd = previous ? previous.start + previous.length : 0;
+    this.timeline.motionSegments = this.timeline.motionSegments.filter(seg => !seg.linkedICFrames);
+    this._linkedICFramesSignature = signature;
+
+    if (connected) {
+      const seg = {
+        id: previous?.id || "ic_lora_input",
+        type: "motion_video",
+        start: previous?.start ?? 0,
+        length: frameCount,
+        trimStart: 0,
+        videoDurationFrames: frameCount,
+        videoFile: "",
+        fileName: "Connected IMAGE frames",
+        videoStrength: previous?.videoStrength ?? 1.0,
+        videoAttentionStrength: previous?.videoAttentionStrength ?? 0.65,
+        resampleMode: previous?.resampleMode || "nearest",
+        linkedICFrames: true,
+      };
+      this.timeline.motionSegments.push(seg);
+      if (previous && frameCount < previous.length) {
+        pullSegmentsAfterShrink(this.timeline.motionSegments, previousEnd, seg.start + seg.length, seg.id);
+      }
+      pushOverlappingSegmentsForward(this.timeline.motionSegments, seg.id);
+      if (!this.retakeMode) this.growTimelineIfNeeded(seg.start + seg.length);
+    }
+
+    this.commitChanges(true);
+    this.render();
+  }
+
   createDOM() {
     this.wrapper = document.createElement("div");
     this.wrapper.className = "pr-wrapper";
@@ -2866,7 +2958,8 @@ class TimelineEditor {
       ev.preventDefault();
     });
 
-    document.addEventListener("mousemove", (ev) => {
+    this._globalPropMouseMove = (ev) => {
+      if (!this.container?.isConnected) return;
       if (isGlobalResizing) {
         const newH = Math.max(60, startGlobalH + (ev.clientY - startGlobalY));
         this.globalPropHeight = newH;
@@ -2881,13 +2974,15 @@ class TimelineEditor {
           }
         }
       }
-    });
+    };
 
-    document.addEventListener("mouseup", () => {
+    this._globalPropMouseUp = () => {
       if (isGlobalResizing) {
         isGlobalResizing = false;
       }
-    });
+    };
+    document.addEventListener("mousemove", this._globalPropMouseMove);
+    document.addEventListener("mouseup", this._globalPropMouseUp);
 
     globalPropContainer.appendChild(globalPromptWrapper);
     globalPropContainer.appendChild(globalPropResizer);
@@ -3127,8 +3222,32 @@ class TimelineEditor {
       }
     });
 
-    window.addEventListener("mousemove", (e) => this.onMouseMove(e));
-    window.addEventListener("mouseup", (e) => this.onMouseUp(e));
+    this._windowMouseMove = (e) => {
+      if (!this.container?.isConnected) return;
+      if (!this._isDragging && !this._isSelectingBox && !this._isHovering) return;
+      if (!this._isDragging && !this._isSelectingBox && this.container.offsetParent === null) return;
+      this._pendingMouseMoveEvent = e;
+      if (this._mouseMoveFrame) return;
+      this._mouseMoveFrame = requestAnimationFrame(() => {
+        this._mouseMoveFrame = null;
+        const pending = this._pendingMouseMoveEvent;
+        this._pendingMouseMoveEvent = null;
+        if (pending) this.onMouseMove(pending);
+      });
+    };
+    this._windowMouseUp = (e) => {
+      if (!this.container?.isConnected && !this._isDragging) return;
+      if (this._pendingMouseMoveEvent) {
+        cancelAnimationFrame(this._mouseMoveFrame);
+        this._mouseMoveFrame = null;
+        const pending = this._pendingMouseMoveEvent;
+        this._pendingMouseMoveEvent = null;
+        this.onMouseMove(pending);
+      }
+      this.onMouseUp(e);
+    };
+    window.addEventListener("mousemove", this._windowMouseMove);
+    window.addEventListener("mouseup", this._windowMouseUp);
 
     // --- Player Controls ---
     const playerControls = document.createElement("div");
@@ -3903,23 +4022,27 @@ class TimelineEditor {
   }
 
   checkResize() {
-    this.syncLayoutToNode(false);
-    const viewportWidth = this.viewport.clientWidth;
-    const currentScale = this.getRenderScale();
+    if (this._destroyed) return;
+    if (this.container?.isConnected && this.container.getClientRects().length > 0 && !document.hidden) {
+      this.node?._syncICVideoFromLink?.();
+      this.syncLayoutToNode(false);
+      const viewportWidth = this.viewport.clientWidth;
+      const currentScale = this.getRenderScale();
 
-    if (viewportWidth > 0 && (this._lastWidth !== viewportWidth || this._lastZoom !== this.zoomLevel || this._lastScale !== currentScale)) {
-      this._lastWidth = viewportWidth;
-      this._lastZoom = this.zoomLevel;
-      this._lastScale = currentScale;
+      if (viewportWidth > 0 && (this._lastWidth !== viewportWidth || this._lastZoom !== this.zoomLevel || this._lastScale !== currentScale)) {
+        this._lastWidth = viewportWidth;
+        this._lastZoom = this.zoomLevel;
+        this._lastScale = currentScale;
 
-      const newCanvasWidth = Math.max(viewportWidth, viewportWidth * this.zoomLevel);
-      this.canvas.style.width = newCanvasWidth + "px";
-      this.resizeCanvas(newCanvasWidth);
+        const newCanvasWidth = Math.max(viewportWidth, viewportWidth * this.zoomLevel);
+        this.canvas.style.width = newCanvasWidth + "px";
+        this.resizeCanvas(newCanvasWidth);
 
-      if (this.node) this.node.setDirtyCanvas?.(true, true);
-      else if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
+        if (this.node) this.node.setDirtyCanvas?.(true, true);
+        else if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
+      }
     }
-    this._renderLoop = requestAnimationFrame(() => this.checkResize());
+    this._renderLoop = setTimeout(() => this.checkResize(), 200);
   }
 
   syncLayoutToNode(forceRender = true) {
@@ -6056,6 +6179,19 @@ class TimelineEditor {
     }
   }
 
+  updateDragReadout(seg) {
+    if (!seg || this.isMultiSelectActive()) return;
+    if (this.durationValue) {
+      this.durationValue.value = (seg.length / this.getFrameRate()).toFixed(2);
+    }
+    if (this.segmentBoundsDisplay) {
+      const startStr = this.formatTime(seg.start, true);
+      const endStr = this.formatTime(seg.start + seg.length, true);
+      const lengthStr = this.formatTime(seg.length, true);
+      this.segmentBoundsDisplay.textContent = `Start: ${startStr} | End: ${endStr} | Length: ${lengthStr}`;
+    }
+  }
+
 
   updateRetakeUIState() {
     const isRetake = this.retakeMode;
@@ -7077,7 +7213,7 @@ class TimelineEditor {
               this.ctx.beginPath();
               this.ctx.rect(startX, trackY, pxWidth, this.motionTrackHeight);
               this.ctx.clip();
-              let rawPath = seg.videoFile || "";
+              let rawPath = seg.videoFile || seg.fileName || "";
               let fname = rawPath.split(/[/\\]/).pop() || "";
               this.ctx.font = "9px sans-serif";
               this.ctx.textAlign = "left";
@@ -7911,6 +8047,9 @@ class TimelineEditor {
   }
 
   onMouseMove(e) {
+    if (!this.container?.isConnected) return;
+    if (!this._isDragging && !this._isSelectingBox && !this._isHovering) return;
+    if (!this._isDragging && !this._isSelectingBox && this.container.offsetParent === null) return;
     const { x: mouseX, y: mouseY } = this.getMousePos(e);
 
     if (this._isSelectingBox && this._dragType === "box_select") {
@@ -8782,7 +8921,7 @@ class TimelineEditor {
       }
     }
 
-    this.updateUIFromSelection(); // Live update of trim values
+    this.updateDragReadout(t.find(s => s.id === this._dragTargetId));
     this.render();
   }
 
@@ -8978,8 +9117,9 @@ class TimelineEditor {
 
   _restoreTransientProperties(copiedSegs, originalSegs) {
     if (!copiedSegs || !originalSegs) return;
+    const originalsById = new Map(originalSegs.map(seg => [seg.id, seg]));
     for (let ps of copiedSegs) {
-      const orig = originalSegs.find(s => s.id === ps.id);
+      const orig = originalsById.get(ps.id);
       if (orig) {
         if (orig._uploading !== undefined) ps._uploading = orig._uploading;
         if (orig._decoding !== undefined) ps._decoding = orig._decoding;
@@ -9207,6 +9347,7 @@ class TimelineEditor {
       this._multiDragInitialSegments = null;
       this._multiDragPreviewTimelines = null;
       this.canvas.style.cursor = "default";
+      this.updateUIFromSelection();
       this.commitChanges();
     }
   }
@@ -11944,12 +12085,20 @@ app.registerExtension({
           }
         };
 
+        this._syncICVideoFromLink = function () {
+          const input = self.inputs?.find(i => i.name === "ic_lora_video");
+          const link = input?.link != null ? app.graph.links[input.link] : null;
+          const originNode = link ? app.graph.getNodeById(link.origin_id) : null;
+          self._timelineEditor?.syncLinkedICFrames(link?.id ?? input?.link ?? null, originNode);
+        };
+
         const origOnConnectionsChange = this.onConnectionsChange;
         this.onConnectionsChange = function (type, index, connected, link_info) {
           if (origOnConnectionsChange) {
             origOnConnectionsChange.apply(this, arguments);
           }
           self._syncGlobalPromptFromLink();
+          self._syncICVideoFromLink();
         };
 
         const origOnDrawForeground = this.onDrawForeground;

@@ -538,7 +538,8 @@ class LTXDirectorGuide:
             for seg in segments:
                 try:
                     video_file = seg.get("videoFile")
-                    if not video_file:
+                    connected_frames = seg.get("videoFrames")
+                    if not video_file and connected_frames is None:
                         continue
 
                     start_frame = int(seg.get("start", 0))
@@ -551,7 +552,9 @@ class LTXDirectorGuide:
                         continue
 
                     start_frame_aligned = start_frame
-                    if seg.get("isStaticImage") or _is_image_file(video_file):
+                    if connected_frames is not None:
+                        video_frames = connected_frames[:length_frames]
+                    elif seg.get("isStaticImage") or _is_image_file(video_file):
                         video_frames = _load_motion_image_frames(video_file, length_frames)
                     else:
                         video_frames = _load_motion_video_frames(video_file, trim_start, length_frames, director_fps, seg.get("resampleMode", "nearest"))

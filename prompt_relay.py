@@ -38,22 +38,30 @@ def build_temporal_cost_scaled(q_token_idx, Lq, Lk, device, dtype, latent_frames
 
 
 def create_mask_fn(q_token_idx, fallback_tokens_per_frame, latent_frames):
-    """Closure: mask_fn(q, k, transformer_options) -> additive mask or None."""
+    """Create a mask callback compatible with tensor and token-count callers."""
     cache = {}
     max_token_idx = max(int(seg["local_token_idx"].max().item()) for seg in q_token_idx) + 1
 
-    def mask_fn(q, k, transformer_options):
-        Lq, Lk = q.shape[1], k.shape[1]
+    def mask_fn(q, k, dtype_or_options=None, device=None, transformer_options=None):
+        if torch.is_tensor(q) and torch.is_tensor(k):
+            Lq, Lk = q.shape[1], k.shape[1]
+            dtype = q.dtype
+            device = q.device
+            options = dtype_or_options if isinstance(dtype_or_options, dict) else (transformer_options or {})
+        else:
+            Lq, Lk = int(q), int(k)
+            dtype = dtype_or_options
+            options = transformer_options or {}
 
         if Lq == Lk:
             return None
 
         # Only apply on conditional pass — not unconditional (negative prompt)
-        cond_or_uncond = transformer_options.get("cond_or_uncond", [])
+        cond_or_uncond = options.get("cond_or_uncond", [])
         if 1 in cond_or_uncond and 0 not in cond_or_uncond:
             return None
 
-        grid_sizes = transformer_options.get("grid_sizes", None)
+        grid_sizes = options.get("grid_sizes", None)
         video_tpf = int(grid_sizes[1]) * int(grid_sizes[2]) if grid_sizes is not None else fallback_tokens_per_frame
         video_lq = latent_frames * video_tpf
 
@@ -63,19 +71,19 @@ def create_mask_fn(q_token_idx, fallback_tokens_per_frame, latent_frames):
 
         mode = "video" if Lq == video_lq else "scaled"
 
-        key = (Lq, Lk, mode, q.device)
+        key = (Lq, Lk, mode, device, dtype)
         if key not in cache:
             if mode == "video":
-                cost = build_temporal_cost(q_token_idx, Lq, Lk, q.device, q.dtype, video_tpf)
+                cost = build_temporal_cost(q_token_idx, Lq, Lk, device, dtype, video_tpf)
             else:
-                cost = build_temporal_cost_scaled(q_token_idx, Lq, Lk, q.device, q.dtype, latent_frames)
+                cost = build_temporal_cost_scaled(q_token_idx, Lq, Lk, device, dtype, latent_frames)
             log.info(
                 "[PromptRelay] Built penalty matrix (%s): Lq=%d, Lk=%d, nonzero=%d/%d",
                 mode, Lq, Lk, (cost > 0).sum().item(), cost.numel(),
             )
             cache[key] = -cost
 
-        return cache[key].to(q.dtype)
+        return cache[key]
 
     return mask_fn
 
