@@ -67,6 +67,28 @@ Released: 2026-07-15
 - Fixed optional latent time alignment by cropping or padding connected latents to the Director target frame count.
 - Updated `YusuSpeechLengthCalculator` so dialogue length detection only reads text inside double quotes and Chinese double quotes.
 
+## Version 2.0.3
+
+Released: 2026-07-16
+
+### Added
+
+- Added an optional `IC-LoRA Video` IMAGE input to `Yusu LTX Director`, allowing frame batches from standard video loader nodes to be used directly as IC-LoRA motion guidance.
+- Added a linked IC timeline segment for connected frame batches. Manually imported IC clips take priority, and the connected input is restored automatically after manual clips are removed.
+
+### Improved
+
+- Improved timeline dragging performance for image, text, audio, video, and IC segments by coalescing mouse movement to one update per animation frame.
+- Reduced drag-time DOM work by updating only segment start, end, and duration readouts until the drag is committed.
+- Reduced workflow-switch overhead by cleaning up inactive listeners, media elements, thumbnail caches, audio buffers, and resize polling.
+
+### Fixed
+
+- Fixed connected IC frame batches not reaching the Director Guide motion encoding path.
+- Fixed failed manual IC uploads incorrectly suppressing a connected IC input.
+- Fixed `IC Size` selection priority so a valid manual IC clip takes precedence over connected frame dimensions.
+- Fixed Prompt Relay compatibility with newer `ComfyUI-KJNodes` LTX2 NAG mask callbacks, supporting both the original 3-argument call and the newer 5-argument call.
+
 ## Node Namespace
 
 This fork registers the following Yusu node IDs:
