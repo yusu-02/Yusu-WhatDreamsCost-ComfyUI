@@ -16,6 +16,20 @@ The original project and its original features were created by WhatDreamsCost. T
 - Improved the custom audio pipeline: automatic custom-audio enabling, mix peak protection, and audio reference token injection into conditioning.
 - Kept the original base node functionality while moving node IDs into the independent Yusu namespace.
 
+## Version 2.0.4
+
+Released: 2026-08-12
+
+### Fixed
+
+- Added LTX 2.5 compatibility to Prompt Relay. The plugin now injects its temporal mask and delegates attention to ComfyUI's native LTX implementation, preserving model-specific behavior added by newer LTX releases.
+- Added a clear error when a MiniMax H3 Audio VAE is connected to LTX Director; use the matching LTX audio VAE instead.
+- Added a clear error when an LTX 2.5 model is paired with the old LTX 2.3 Gemma3 text encoder; use the matching Gemma4 encoder with projection.
+
+### Compatibility
+
+- LTX 2.5 requires ComfyUI `0.32.0` or newer and the latest `ComfyUI-LTXVideo`. LTX 2.3 workflows keep the existing ComfyUI `0.3.48` minimum.
+
 ## Version 2.0.1
 
 Released: 2026-07-02

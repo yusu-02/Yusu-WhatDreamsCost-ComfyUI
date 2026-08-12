@@ -71,44 +71,17 @@ def _wan_i2v_forward(self, mask_fn, x, context, context_img_len, transformer_opt
     return self.o(x + img_x)
 
 
-def _ltx_forward(self, mask_fn, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
-    from comfy.ldm.lightricks.model import apply_rotary_emb
-
-    is_self_attn = context is None
-    context = x if is_self_attn else context
-
-    q = self.q_norm(self.to_q(x))
-    k = self.k_norm(self.to_k(context))
-    v = self.to_v(context)
-
-    if pe is not None:
-        q = apply_rotary_emb(q, pe)
-        k = apply_rotary_emb(k, pe if k_pe is None else k_pe)
-
-    if not is_self_attn:
-        active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
-        temporal_mask = active_mask_fn(q, k, transformer_options) if active_mask_fn is not None else None
+def _ltx_forward(original_forward, mask_fn, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
+    active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
+    if context is not None and active_mask_fn is not None:
+        temporal_mask = active_mask_fn(x, context, transformer_options)
         if temporal_mask is not None:
             mask = temporal_mask if mask is None else mask + temporal_mask
 
-    if mask is None:
-        out = comfy.ldm.modules.attention.optimized_attention(
-            q, k, v, self.heads, attn_precision=self.attn_precision,
-            transformer_options=transformer_options,
-        )
-    else:
-        out = _masked_attention(q, k, v, self.heads, mask=mask,
-                                attn_precision=self.attn_precision,
-                                transformer_options=transformer_options)
-
-    if self.to_gate_logits is not None:
-        gate_logits = self.to_gate_logits(x)
-        b, t, _ = out.shape
-        out = out.view(b, t, self.heads, self.dim_head)
-        out = out * (2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1)
-        out = out.view(b, t, self.heads * self.dim_head)
-
-    return self.to_out(out)
+    return original_forward(
+        x, context=context, mask=mask, pe=pe, k_pe=k_pe,
+        transformer_options=transformer_options,
+    )
 
 
 class _CrossAttnPatch:
@@ -125,6 +98,20 @@ class _CrossAttnPatch:
             transformer_options = kwargs.get("transformer_options", {})
             active_mask_fn = transformer_options.get("promptrelay_mask_fn", mask_fn)
             return impl(self_module, active_mask_fn, *args, **kwargs)
+
+        return types.MethodType(wrapped, obj)
+
+
+class _LTXCrossAttnPatch:
+    def __init__(self, original_forward, mask_fn):
+        self.original_forward = original_forward
+        self.mask_fn = mask_fn
+
+    def __get__(self, obj, objtype=None):
+        original_forward, mask_fn = self.original_forward, self.mask_fn
+
+        def wrapped(self_module, *args, **kwargs):
+            return _ltx_forward(original_forward, mask_fn, *args, **kwargs)
 
         return types.MethodType(wrapped, obj)
 
@@ -179,7 +166,7 @@ def apply_patches(model_clone, arch, mask_fn):
                     continue
                 key = f"diffusion_model.transformer_blocks.{idx}.{attr}.forward"
                 _check_unpatched(model_clone, key)
-                model_clone.add_object_patch(key, _CrossAttnPatch(_ltx_forward, mask_fn).__get__(module, module.__class__))
+                model_clone.add_object_patch(key, _LTXCrossAttnPatch(module.forward, mask_fn).__get__(module, module.__class__))
         return
 
     raise ValueError(f"Unknown model arch: {arch}")

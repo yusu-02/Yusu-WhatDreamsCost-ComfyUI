@@ -858,6 +858,28 @@ def _add_audio_ref_tokens(conditioning, audio_latent):
     return node_helpers.conditioning_set_values(conditioning, {"ref_audio": ref_audio})
 
 
+def _get_ltx_audio_vae_inner(audio_vae):
+    inner = getattr(audio_vae, "first_stage_model", audio_vae)
+    if not hasattr(inner, "latent_frequency_bins") or not callable(getattr(inner, "num_of_latents_from_frames", None)):
+        raise ValueError(
+            "Yusu LTX Director requires an LTX Audio VAE; "
+            f"{type(inner).__name__} is incompatible. Select "
+            "models/vae/ltx/ltx-2.5-audio-vae-bf16.safetensors in the Audio VAE loader."
+        )
+    return inner
+
+
+def _validate_ltx_text_encoder(model, clip):
+    diffusion_model = getattr(getattr(model, "model", None), "diffusion_model", None)
+    text_encoder_key = getattr(getattr(clip, "cond_stage_model", None), "text_encoder_key", None)
+    if getattr(diffusion_model, "use_keyframes_abs_pos_embedding", False) and text_encoder_key == "gemma3_12b":
+        raise ValueError(
+            "Yusu LTX Director detected an LTX 2.5 model with an LTX 2.3 Gemma3 text encoder. "
+            "Use CLIPLoader (type: ltxv) with "
+            "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors."
+        )
+
+
 def _convert_to_latent_lengths(pixel_lengths, temporal_stride, latent_frames):
     """Convert pixel-space segment lengths to integer latent-space lengths using the
     largest-remainder method. Targets the full `latent_frames` when the pixel sum looks
@@ -1138,6 +1160,9 @@ class LTXDirector(io.ComfyNode):
                 use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False,
                 use_ic_video_size=False, ic_lora_video=None) -> io.NodeOutput:
 
+        _validate_ltx_text_encoder(model, clip)
+        inner_audio_vae = _get_ltx_audio_vae_inner(audio_vae) if audio_vae is not None else None
+
         # Parse timeline data
         try:
             tdata = json.loads(timeline_data) if timeline_data else {}
@@ -1340,11 +1365,9 @@ class LTXDirector(io.ComfyNode):
         if audio_vae is not None:
             # Helper to generate empty latent
             def get_empty_latent():
-                # Support both raw AudioVAE objects and ComfyUI VAE wrappers.
-                inner = getattr(audio_vae, "first_stage_model", audio_vae)
                 z_channels = audio_vae.latent_channels
-                audio_freq = inner.latent_frequency_bins
-                num_audio_latents = inner.num_of_latents_from_frames(ltxv_length, float(frame_rate))
+                audio_freq = inner_audio_vae.latent_frequency_bins
+                num_audio_latents = inner_audio_vae.num_of_latents_from_frames(ltxv_length, float(frame_rate))
                 audio_latents = torch.zeros(
                     (1, z_channels, num_audio_latents, audio_freq),
                     device=comfy.model_management.intermediate_device(),
